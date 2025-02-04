@@ -1,0 +1,1382 @@
+---
+title: "belief-practice_Chi_0122"
+author: "Chi Zhang"
+date: "2025-01-22"
+output:
+  pdf_document:
+    latex_engine: xelatex
+  html_document: default
+  word_document: default
+
+editor_options:
+  markdown:
+    wrap: sentence
+---
+
+
+```{r, echo=FALSE, results='hide'}
+load("full_workspace.RData")
+```
+
+```{r, echo=FALSE, results='hide', warning = FALSE, message = FALSE }
+# Clear environment 
+rm(list = ls())
+
+knitr::opts_knit$set(global.replacements = list("（" = "(", "）" = ")"))
+
+# Setting basic knitr options
+knitr::opts_chunk$set(
+  echo = FALSE,  # Don't show code in output
+  warning = FALSE,  # Don't show warnings
+  message = FALSE  # Don't show messages
+)
+
+
+library(brms)
+library(tidyverse)
+library(GGally)
+library(viridis)
+library(gridExtra)
+library(ggridges)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(bayesplot)
+library(bayestestR)
+library(extrafont)
+library(DiagrammeR)
+library(readxl)
+library(patchwork)
+
+#ggplot theme setting...
+theme_set(bayesplot::theme_default())
+
+#Rstan setting...
+rstan::rstan_options(auto_write = TRUE)
+options(mc.cores = 4) # for running 4 chains
+
+# Set ggplot theme
+theme_set(bayesplot::theme_default())
+
+
+instrument_clean <- read_excel("~/Desktop/R - project/belief-practice/dataset/instrument_clean.xlsx")
+
+
+# Define items vector (keeping original structure)
+items <- c(
+  
+  "Ba_1_r", "Ba_2_r", "Ba_3_r", "Ba_4_r", "Ba_5", "Ba_6", "Ba_7", "Ba_8",
+  "Bb_1_r", "Bb_2", "Bb_3_r", "Bb_4_r", "Bb_5", "Bb_6_r", "Bb_7_r", "Bb_8_r",
+  "Bb_9_r", "Bb_10_r", "Bb_11_r", "Bc_1_r", "Bc_2_r", "Bc_3", "Bc_4", "Bc_5"
+  
+)
+```
+
+|  |  |
+|-----------|-------------------------------------------------------------|
+| 1 | Mathematics is a collection of rules and procedures. |
+| 2 | Mathematics involves remembering and applying definitions, formulas, mathematical facts and procedures. |
+| 3 | To do mathematics requires much practice of correct application of routines. |
+| 4 | When solving mathematical tasks you need to know the correct procedure in advance. |
+| 5 | Mathematics involves creativity and new ideas. |
+| 6 | Many aspects of mathematics have practical relevance. |
+| 7 | Mathematics helps solve everyday problems and tasks. |
+| 8 | In mathematics many things can be discovered and tried out by oneself. |
+
+|  |  |
+|-----------|-------------------------------------------------------------|
+| 1 | Students must be able to solve mathematics problems quickly. |
+| 2 | Students must be able to understand why the answer is correct. |
+| 3 | Students learn mathematics best by attending to the teacher’s standard explanations. |
+| 4 | For students, non-standard procedures can interfere with learning the correct procedure. |
+| 5 | Students can figure out a way to solve mathematical problems without a teacher’s help. |
+| 6 | Only the more able students can participate in mathematics activities. |
+| 7 | To be good at mathematics one needs to be talented. |
+| 8 | Among other forms of talent, mathematical talent is relatively fixed |
+| 9 | Boys tend to be more talented in mathematics than girls. |
+| 10 | Attention to mathematically weak students can interfere with the learning experience of other students. |
+| 11 | Attention to mathematically talented students can interfere with the learning experience of other students. |
+
+|  |  |
+|-----------|-------------------------------------------------------------|
+| 1 | Innovative pedagogy (e.g., project-based learning, flipped classroom) is not worth the time and expense. |
+| 2 | Innovative pedagogy (e.g., project-based learning, flipped classroom) should only play a minor, supplementary role in the mathematics classroom. |
+| 3 | I'm continuously seeking better ways to teach mathematics. |
+| 4 | Teachers should help students using mathematics to critically analyze the world. |
+| 5 | Discussion of social issues should be involved in the maths classroom. |
+
+# Data Check
+
+This dataset is a part of my survey project, which investigated belief and practice of secondary mathematics teacher in China.
+In this essay, I'll specifically look into belief instrument.
+It is about teachers belief about equity.
+The very basic assumption is the better performance of teachers, the more inclusive they are, while the others are more exclusive.
+While the insturment is designed a bit more complicated than that - it includes 24 items with 8 for belief about mathematics (start with Ba), 11 for belief about learners (start with Bb) and 5 for belief about pedagogy (start with Bc).
+There are some items are of reverse wording, I have already cleaned this by replace the original score with reverse score, which with a "\_r" end.
+Let's first have a peek about the dataset, the response distribution, and missing data.
+
+```{r}
+# Create a function to count responses for each item
+count_responses <- function(data, items) {
+  response_counts <- map_dfr(items, function(item) {
+    # Define all expected categories
+    all_categories <- c("1", "2", "3", "4", "5", "NA")
+    
+    # Count responses ensuring all categories are included
+    counts <- table(factor(data[[item]], levels = all_categories))
+    
+    # Check for mismatches and ensure consistent row lengths
+    data.frame(
+      item = rep(item, length(all_categories)),
+      category = all_categories,
+      count = as.numeric(counts)
+    )
+  })
+  return(response_counts)
+}
+
+# Get response counts
+response_counts <- count_responses(instrument_clean, items)
+
+
+# Calculate percentages
+response_counts <- response_counts %>%
+  group_by(item) %>%
+  mutate(percentage = count / sum(count) * 100)
+
+# Create plot
+resp_dist <- ggplot(response_counts, aes(x = category, y = percentage)) +
+  geom_col(fill = "black", width = 0.7) +
+  facet_wrap(~item, ncol = 6) +
+  labs(
+    x = "Response Category",
+    y = "Percentage (%)"
+  ) +
+  scale_y_continuous(
+    limits = c(0, 100),
+    expand = c(0, 0)
+  ) +
+  theme_minimal() +
+  theme(
+    text = element_text(family = "sans", size = 8),
+    axis.text = element_text(family = "sans", size = 8),
+    strip.text = element_text(family = "sans", size = 8),
+    legend.position = "none",
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.title = element_text(family = "sans", size = 8),
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 0.5)
+  ) +
+  scale_x_discrete(expand = c(0.1, 0.1))
+
+
+
+print(resp_dist)
+
+```
+
+## (Missing) Data cleaning
+
+Gender&YearG (stands for yeargroup) will be used later in DIF.
+Here, we first just look at the Belief instrument, the 24 items.
+There is only 155 observations for this data, and the extreme categogies (1, and sometimes 5) are seldom appear.
+When looking into missing data in terms of items, there is some compeletely missing in category 1&2.
+There are possible two strategies to treat this: i.
+to collapse 1/2 for every item; ii.
+to collapse 1/2 for items which that have weak response in this two categories.
+While look through all the response distribution, I find 1/2 are often too thin to provide enough information, and if I choose ii, then it is problematic if I want to conduct RSM or GRM (and possibily any IRT without flexible threshold), becaosue they won't have any data about few thresholds; also considering the small sample nature of the dataset, a simple collapsing solution is easier to conduct, and possibly raising the reliability wihile not losing too much information.
+Also looking into missing data in terms of person - I want to keep as much information as possible instead of simple deleting them.
+Thus I look at those who missing more than 40% of the instruments (missing_count \>= 10), and find out 3 persons miss the whole instrument.
+Of course we should delete them - but how about others?
+Instead of treating them as trunky data and throw away, I want to try a weighted penalty solution.
+The goal is to avoid discarding participants with missing data outright while ensuring that those with significant gaps contribute less to the analysis.
+Here's how it works:
+
+-   **If someone is missing fewer than 10 items (roughly 40%)**, they receive a full weight of 1, meaning their responses are treated as completely reliable.
+-   **If someone is missing all 24 items**, their weight drops to 0, and they are excluded from the analysis.
+-   **For participants in between**, their weight decreases step by step according to an exponential decay function. The penalty grows more severe as the number of missing items increases, reflecting reduced confidence in their data.
+
+Now based on the two strategies, let's try to fit them into simple models to see whether it works - basically, RSM in Beyesian is used as a foundation model, with 3 variations (i. null model, ii. collapsing model, iii. weighted collapsing model)
+
+```{r, echo=FALSE, results='hide'}
+
+
+create_stepped_weights <- function(missing_count) {
+  base_threshold <- 10  
+  step_size <- 2       
+  decay_rate <- 3      
+  
+  if (missing_count >= 24) {
+    return(0.0)
+  }
+  if (missing_count < base_threshold) {
+    return(1.0)
+  }
+  
+  step_level <- floor((missing_count - base_threshold) / step_size)
+  weight <- exp(-decay_rate * (step_level * step_size / 24))
+  weight <- round(weight, 1)
+  
+  return(weight)
+}
+
+recode_response <- function(x) {
+  new_x <- x
+  new_x[new_x == 2] <- 1
+  new_x[new_x == 3] <- 2
+  new_x[new_x == 4] <- 3
+  new_x[new_x == 5] <- 4
+  return(new_x)
+}
+
+# 2. 准备三个模型共用的基础数据
+# 计算权重
+missing_weights <- instrument_clean %>%
+  mutate(person = row_number()) %>%
+  select(person, all_of(items)) %>%
+  rowwise() %>%
+  mutate(
+    missing_count = sum(is.na(c_across(all_of(items)))),
+    weight = create_stepped_weights(missing_count)
+  ) %>%
+  ungroup()
+
+# 创建合并类别的数据
+instrument_collapsed <- instrument_clean
+for(item in items) {
+  instrument_collapsed[[item]] <- recode_response(instrument_clean[[item]])
+}
+
+# 3. 创建三个完全可比的长格式数据集
+# 原始数据长格式
+long_data_original <- instrument_clean %>%
+  mutate(person = row_number()) %>%
+  select(person, all_of(items)) %>%
+  pivot_longer(
+    cols = all_of(items),
+    names_to = "item",
+    values_to = "response"
+  ) %>%
+  left_join(
+    missing_weights %>% select(person, weight),
+    by = "person"
+  )
+
+# 合并类别的长格式数据
+long_data_collapsed <- instrument_collapsed %>%
+  mutate(person = row_number()) %>%
+  select(person, all_of(items)) %>%
+  pivot_longer(
+    cols = all_of(items),
+    names_to = "item",
+    values_to = "response"
+  ) %>%
+  left_join(
+    missing_weights %>% select(person, weight),
+    by = "person"
+  )
+
+# 4. 设置共同的先验
+priors <- c(
+  prior(normal(0, 3), class = "sd", group = "item"),
+  prior(normal(0, 3), class = "sd", group = "person")
+)
+
+# 5. 定义三个模型
+# Null RSM
+bf_null_rsm <- bf(
+  response ~ 1 + (1|item) + (1|person),
+  family = brmsfamily("acat", "logit")
+)
+
+# Weighted RSM
+bf_w_rsm <- bf(
+  response | weights(weight) ~ 1 + (1|item) + (1|person),
+  family = brmsfamily("acat", "logit")
+)
+
+# Weighted Collapsed RSM
+bf_w_c_rsm <- bf(
+  response | weights(weight) ~ 1 + (1|item) + (1|person),
+  family = brmsfamily("acat", "logit")
+)
+
+# 6. 拟合模型
+fit_null_rsm <- brm(
+  bf_null_rsm,
+  data = long_data_original,
+  prior = priors,
+  chains = 4,
+  cores = 4,
+  iter = 2000,
+  warmup = 1000,
+  control = list(adapt_delta = 0.95),
+  file = "models/null_rsm"
+)
+
+fit_w_rsm <- brm(
+  bf_w_rsm,
+  data = long_data_original,
+  prior = priors,
+  chains = 4,
+  cores = 4,
+  iter = 2000,
+  warmup = 1000,
+  control = list(adapt_delta = 0.95),
+  file = "models/weighted_rsm"
+)
+
+fit_w_c_rsm <- brm(
+  bf_w_c_rsm,
+  data = long_data_collapsed,
+  prior = priors,
+  chains = 4,
+  cores = 4,
+  iter = 2000,
+  warmup = 1000,
+  control = list(adapt_delta = 0.95),
+  file = "models/weighted_collapsed_rsm"
+)
+
+```
+
+Let's see the comparasion of the different models:
+
+```{r}
+print("Comparison 1: Null RSM vs Weighted RSM")
+print("----------------------------------------")
+comparison1 <- loo(fit_null_rsm, fit_w_rsm)
+print(comparison1, simplify = FALSE)
+
+
+print("\nComparison 2: Weighted RSM vs Weighted Collapsed RSM")
+print("----------------------------------------")
+comparison2 <- loo(fit_w_rsm, fit_w_c_rsm)
+print(comparison2, simplify = FALSE)
+```
+
+  It works! In the result, we can see the null model works the worst - when I introduce the weighted mechanism in, the model works better, and when I further collapse the 1/2 category it works significantly better.
+  We can have a look at the best model (for now), fit_w_c_rsm (which is RSM with weighted/category collapsed response data).
+
+# Simplist foundational Model check
+
+Lets start by checking the fit statistics:
+
+```{r}
+# 显示模型摘要
+summary(fit_w_c_rsm)
+
+# 在R中显示图形
+plot(fit_w_c_rsm, variable = c("^b_", "^sd_"), regex = TRUE)
+```
+
+  Also have a look at person/item map.
+  For item difficulty, the model seems like have a quite good distribution; and though in person map there are few outliers or people with large HDI (indicating the uncertainty of the ability estimate), it is overall acceptable implying a good fit, which means we could maintain all the items (and participants) for now.
+
+```{r}
+# 定义项目顺序
+item_order <- c(
+  "Ba_1_r", "Ba_2_r", "Ba_3_r", "Ba_4_r", "Ba_5", "Ba_6", "Ba_7", "Ba_8",
+  "Bb_1_r", "Bb_2", "Bb_3_r", "Bb_4_r", "Bb_5", "Bb_6_r", "Bb_7_r", "Bb_8_r", 
+  "Bb_9_r", "Bb_10_r", "Bb_11_r", "Bc_1_r", "Bc_2_r", "Bc_3", "Bc_4", "Bc_5"
+)
+
+
+
+# Extract random effects
+ranef_wc <- ranef(fit_w_c_rsm)
+
+# Difficulty plot
+p1 <- ranef_wc$item[, , "Intercept"] %>%
+ as_tibble(rownames = "item") %>%
+ mutate(item = factor(item, levels = item_order)) %>%
+ ggplot(aes(x = Estimate, y = item)) +
+ geom_point(size = 1.5, alpha = 0.8) +
+ geom_errorbarh(aes(xmin = Q2.5, xmax = Q97.5), height = 0.2, alpha = 0.6) +
+ labs(title = "Item Difficulty", x = "Estimate", y = NULL) 
+
+# Person plot  
+p2 <- ranef_wc$person[, , "Intercept"] %>%
+ as_tibble(rownames = "person") %>%
+ arrange(Estimate) %>%
+ mutate(id = row_number()) %>%
+ ggplot(aes(x = id, y = Estimate)) +
+ geom_pointrange(aes(ymin = Q2.5, ymax = Q97.5), alpha = 0.7, size = 0.3) +
+ coord_flip() +
+ labs(title = "Person Parameters", x = NULL, y = "Estimate") 
+ 
+
+# Combine and save
+combined_plot <- p1 | p2
+
+print(combined_plot)
+```
+  Now let's look into the RSM structure. It simply assumes that 24 items are unidimensional - they all contribute to one specific construct, which is mathematics teacher's belief about equity. While we can simply tell this is not true based on intuition (and theory) - people with general inclusive belief about education might hold something different when it takes the context of mathematics.
+  Simply put, there might be different dimension of belief about equity, and these different dimension groups might (not) share the commoness (which can be perceived as general belief about equity).
+
+## Dimensionality
+
+  The original instrument already provided a guess based on theory - we may believe there are at least three dimensions, namely belief about mathematics, belief about learners, and belief about pedagogy. Now we want to know what is the latent construct of belief - how these three sub-beliefs connect with each other (or not)?
+
+
+### Potential multidimensional solution to iterate model
+
+Here is three possible solutions with different model settings:
+1. **Unidimensional** - we assume that belief about equity is unidimensional, which means three dimensions are co-linear (which we just proved is problematic);
+
+2.  **Correlated Traits model** - we assume the 24 item instrument contribute into 3 constructs(beliefs), and they may link with each other, while we don't assume there is a explicit general construct can explain all three;
+
+3.  **Bifactor multidimensional model** - we assume there is a general factor (general belief about equity) that affect all 24 items, while within each subinstruments there are specific factors/constructs (belief about maths/learner/pedagogy) is situation specific, and is orthogonal and independent with general belief.
+    G&S factors together explain the instrument performance.
+
+        
+  i. The Bayesian package (brms) used in this study, to the best of my knowledge, does not yet support a simple and intuitive coding solution for directly fitting standard Bifactor Model. Given that brms is built on the GLMM framework, I opted for a GLMM-based approximation to the Bifactor structure that aligns better with the package’s capabilities.
+
+  ii. I have also experimented with using more specialized tools like mirt to fit complex models (without Beyesian approach), including standard Bifactor models. However, the small sample size in this study resulted in sparse information, leading to difficulties in model convergence and increased parameter instability.
+
+# Competing MIRT choices BF/CT
+
+  Let's first try the two choices. Note that for unidimensional rsm model, the model is rather simple and of less parameter pressure, thus it is easy to use the default settings for converge. While for complex models with more parameters to estimate, we often adapt settings to make model better converge. This is at expense of calculation pressure, often cost more time and computational power. Two common strategies to do this is 
+  i. adding iteration times, e.g., from 2000 to 4000; 
+  ii. adding control settings, e.g., adapt_delta = 0.99, max_treedepth = 15.
+  Solely choosing ii is a more economical option for me here.
+
+```{r, echo=FALSE, results='hide'}
+# Add dimension indicators
+long_data_collapsed <- long_data_collapsed %>%
+  mutate(
+    dima = if_else(grepl("^Ba", item), 1, 0),
+    dimb = if_else(grepl("^Bb", item), 1, 0),
+    dimc = if_else(grepl("^Bc", item), 1, 0)
+  )
+
+# Priors for CT model
+priors_ct <- c(
+    prior(normal(0, 3), class = "Intercept"),
+    prior(normal(0, 3), class = "sd", group = "item"),
+    prior(normal(0, 3), class = "sd", group = "person"),
+    prior(lkj(2), class = "cor", group = "person")
+)
+
+# Priors for BF model
+priors_bf <- c(
+    prior(normal(0, 3), class = "Intercept"),
+    prior(normal(0, 3), class = "sd", group = "item"),
+    prior(normal(0, 3), class = "sd", group = "person"),
+    prior(normal(0, 3), class = "sd", group = "person", coef = "dima"),
+    prior(normal(0, 3), class = "sd", group = "person", coef = "dimb"),
+    prior(normal(0, 3), class = "sd", group = "person", coef = "dimc")
+)
+
+# Cross-trait RSM
+bf_ct <- bf(
+  response | weights(weight) ~ 1 + (1|item) + 
+  (0 + dima + dimb + dimc|person),
+  family = brmsfamily("acat", "logit")
+)
+
+fit_ct_rsm <- brm(
+  bf_ct,
+  data = long_data_collapsed,
+  prior = priors_ct,
+  chains = 4,
+  cores = 4,
+  iter = 2000,
+  warmup = 1000,
+  control = list(adapt_delta = 0.99, max_treedepth = 15),
+  file = "models/ct_rsm"
+)
+
+# Bifactor RSM
+bf_bf <- bf(
+  response | weights(weight) ~ 1 + 
+    (1 | item) +           
+    (1 | person) +    
+    (0 + dima || person) +  
+    (0 + dimb || person) +  
+    (0 + dimc || person),   
+  family = brmsfamily("acat", "logit")
+)
+  
+fit_bf_rsm <- brm(
+  bf_bf,
+  data = long_data_collapsed,
+  prior = priors_bf,
+  chains = 4,
+  cores = 4,
+  iter = 2000,
+  warmup = 1000,
+  control = list(adapt_delta = 0.99, max_treedepth = 15),
+  file = "models/bf_rsm"
+)
+```
+
+### model comparasion (null vs ct vs bf)
+
+```{r}
+# Model comparison
+comparison_2 <- loo_compare(
+ loo(fit_w_c_rsm),  
+ loo(fit_ct_rsm),   
+ loo(fit_bf_rsm)
+)
+
+print(comparison_2, simplify= FALSE)
+
+```
+
+### model summary (bf ct)
+
+```{r}
+summary (fit_bf_rsm)
+summary(fit_ct_rsm)
+```
+
+  Statistically, the multidimensional choice is significantly better than the null model (elpd_diff is way larger than 2\*se_diff), and the CT-RSM works more or less the same with BF-RSM.
+  While there is one problem in both two models (and actually also in the null rsm model)- the intercept [1] & [2] are almost identical.
+Recall my category collapse move, we shall know that now category 1 is (strongly) disagree, 2 is neutral, 3 is agree, 4 is strongly agree.
+Thus intercept [1] & [2] stands for shifts from disagree to neutral, and neutral to agree. Thus the same of intercept [1]&[2] means the model sees little distinction between respondents choosing "neutral" versus "agree"/"(strongly) disagree".
+  Statistically, one simple approach is to further collapse the categories - to add 'neutral' into 'agree' or into "(strongly) disagree"; while linguistically and practically, this is unacceptable. For the original category collapsing move, the two categories disagree and strongly disagree more or less points to same 'negative' direction, but now adding neutral to either agree or disagree category will cause explanation difficulties; also, comparing to the first collapse move where the data don't have enough observation in category 1&2 to estimate, we do have plenty of observations people endorsing neutral. We shall find a way to make sense of it.
+
+# Model iteration (1PL vs 2PL)
+
+  we already discussed that the model needs a multidimensional structure (though not sure bf/ct which is better). Now, I want to try to make intercept [1] & [2] less identical - at least the "neutral" can be as a statistically proper category. One approach is to introduce the discrimination parameter, considering how good each items can distinguish participants (item with higher discrimination means that people with higher ability are more likely to score higher, that being 'distinguished' among others).
+  We take structure BF/CT together, using GRSM (the 2pl version of RSM) for iteration test.
+
+```{r, echo=FALSE, results='hide'}
+# Priors for CT-GRSM
+priors_ct_grsm <- c(
+    prior(normal(0, 3), class = "Intercept"),
+    prior(normal(0, 3), class = "sd", group = "item"),
+    prior(normal(0, 3), class = "sd", group = "person"),
+    prior(lkj(2), class = "cor", group = "person"),
+    prior(normal(0, 1), class = "sd", group = "item", dpar = "disc")
+)
+
+# Priors for BF-GRSM
+priors_bf_grsm <- c(
+    prior(normal(0, 3), class = "Intercept"),
+    prior(normal(0, 3), class = "sd", group = "item"),
+    prior(normal(0, 3), class = "sd", group = "person"),
+    prior(normal(0, 3), class = "sd", group = "person", coef = "dima"),
+    prior(normal(0, 3), class = "sd", group = "person", coef = "dimb"),
+    prior(normal(0, 3), class = "sd", group = "person", coef = "dimc"),
+    prior(normal(0, 1), class = "sd", group = "item", dpar = "disc")
+)
+
+# CT-GRSM formula
+bf_ct_grsm <- bf(
+  response | weights(weight) ~ 1 + (1|i|item) + 
+  (0 + dima + dimb + dimc|person),
+  disc ~ 1 + (1 |i| item),
+  family = brmsfamily("acat", "logit")
+)
+
+# BF-GRSM formula
+bf_bf_grsm <- bf(
+  response | weights(weight) ~ 1 + (1|i|item) + 
+    (1 | person) +    
+    (0 + dima || person) +  
+    (0 + dimb || person) +  
+    (0 + dimc || person),
+  disc ~ 1 + (1 |i| item),
+  family = brmsfamily("acat", "logit")
+)
+
+# Fit CT-GRSM
+fit_ct_grsm <- brm(
+  bf_ct_grsm,
+  data = long_data_collapsed,
+  prior = priors_ct_grsm,
+  chains = 4,
+  cores = 4,
+  iter = 2000,
+  warmup = 1000,
+  control = list(adapt_delta = 0.99, max_treedepth = 15),
+  file = "models/ct_grsm"
+)
+
+# Fit BF-GRSM
+fit_bf_grsm <- brm(
+  bf_bf_grsm,
+  data = long_data_collapsed,
+  prior = priors_bf_grsm,
+  chains = 4,
+  cores = 4,
+  iter = 2000,
+  warmup = 1000,
+  control = list(adapt_delta = 0.99, max_treedepth = 15),
+  file = "models/bf_grsm"
+)
+```
+
+## Threshold check
+
+```{r}
+summary (fit_bf_grsm)
+summary (fit_ct_grsm)
+```
+
+  The summary shows when we introduce the discrimination parameter in, the models obtains more information to distinguish intercept 1/2.
+And the reason is quite obvious - in 1pl, we assume every item with same discrimination (=1). This essentially forces the slope of the latent trait curve to be identical across all items, which means that no matter how a respondent’s latent ability (or attitude) varies, the model cannot adjust how sharply each item shifts between response categories.
+
+  By contrast, once we allow each item to have its own discrimination parameter (as in a 2PL approach), an item with substantial empirical evidence to differentiate adjacent categories—such as “Strongly Disagree” vs. “Neutral,” or “Neutral” vs. “Agree”—can exhibit a steeper or shallower slope.
+  And we can clearly see that cor(Intercept,disc_Intercept) = 0.89 [0.75, 0.96], which means disc is highly associate with difficulty (which make the assumption of every disc = 1 problematic).
+
+## item fit check
+
+  Now lets check the item difficulty/disc map.
+
+```{r}
+# Extract random effects for CT and BF models
+ranef_ct <- ranef(fit_ct_grsm)
+ranef_bf <- ranef(fit_bf_grsm)
+
+# Difficulty data
+difficulty_ct <- ranef_ct$item[,,"Intercept"] %>%
+ as_tibble(rownames = "item") %>%
+ mutate(item = factor(item, levels = item_order))
+
+difficulty_bf <- ranef_bf$item[,,"Intercept"] %>%
+ as_tibble(rownames = "item") %>%
+ mutate(item = factor(item, levels = item_order))
+
+# Discrimination data (with exp transform)
+discrimination_ct <- exp(ranef_ct$item[,,"disc_Intercept"]) %>%
+ as_tibble(rownames = "item") %>%
+ mutate(item = factor(item, levels = item_order))
+
+discrimination_bf <- exp(ranef_bf$item[,,"disc_Intercept"]) %>%
+ as_tibble(rownames = "item") %>%
+ mutate(item = factor(item, levels = item_order))
+
+# Create plots
+plot_diff_ct <- ggplot(difficulty_ct, aes(x = Estimate, y = item)) +
+ geom_point(size = 1.5, alpha = 0.8) +
+ geom_errorbarh(aes(xmin = Q2.5, xmax = Q97.5), height = 0.2, alpha = 0.6) +
+ labs(title = "CT-GRSM: Item Difficulty", x = "Estimate", y = NULL)
+
+plot_disc_ct <- ggplot(discrimination_ct, aes(x = Estimate, y = item)) +
+ geom_point(size = 1.5, alpha = 0.8) +
+ geom_errorbarh(aes(xmin = Q2.5, xmax = Q97.5), height = 0.2, alpha = 0.6) +
+ labs(title = "CT-GRSM: Item Discrimination", x = "Estimate", y = NULL) 
+
+plot_diff_bf <- ggplot(difficulty_bf, aes(x = Estimate, y = item)) +
+ geom_point(size = 1.5, alpha = 0.8) +
+ geom_errorbarh(aes(xmin = Q2.5, xmax = Q97.5), height = 0.2, alpha = 0.6) +
+ labs(title = "BF-GRSM: Item Difficulty", x = "Estimate", y = NULL) 
+
+plot_disc_bf <- ggplot(discrimination_bf, aes(x = Estimate, y = item)) +
+ geom_point(size = 1.5, alpha = 0.8) +
+ geom_errorbarh(aes(xmin = Q2.5, xmax = Q97.5), height = 0.2, alpha = 0.6) +
+ labs(title = "BF-GRSM: Item Discrimination", x = "Estimate", y = NULL) 
+
+# Combine and save plots
+model_comparison <- (plot_diff_ct | plot_disc_ct) / (plot_diff_bf | plot_disc_bf)
+
+print(model_comparison)
+```
+
+  Some really interesting results here. Firstly, as we already find out, ct and bf functions similarly well - we see the performance of items in two models is quite similar as well. Secondly, we can see ba_1_r \~ ba_4_r (reversed items) works statistically really 'bad'. it shows shows extremely 'hard' that everyone scores low. In addition, the reason why these items were not found to be abnormal in the previous item check as ‘outliers’ is that the assumed discrimination=1 absorbed a lot of abnormal information that should have been reported. Here, the discrimination is extremely low, means that the items can't distinguish people from ability well - not only respondents can easily score high, but also respondents perform nearly randomly, regardless their ability.
+
+  Let's look at the items:
+
+|  |  |
+|-----------|-------------------------------------------------------------|
+| 1 | Mathematics is a collection of rules and procedures. |
+| 2 | Mathematics involves remembering and applying definitions, formulas, mathematical facts and procedures. |
+| 3 | To do mathematics requires much practice of correct application of routines. |
+| 4 | When solving mathematical tasks you need to know the correct procedure in advance. |
+
+  These are all classic items being used and validated in similar research/instrument, while the results shows they work unwell for my sample. Some possible explanations might be:
+
+        
+  i) These items were designed to assess teachers’ beliefs about the nature of mathematics on a relatively linear spectrum, with one end representing a rigorous, structured view full of rules and procedures, and the other end representing a creative, exploratory perspective. However, in these items, this contrast is not explicitly articulated, which might have led our sample to fail to perceive the intended meaning of the items.
+
+  ii) This could also be due to certain cultural differences. For example, teachers in Western countries might interpret these items with a “yes, but” approach, opting for more conservative responses as a way of reconciling the tension between creativity and structure. In contrast, Chinese teachers may view these two aspects as independent—believing that mathematics can simultaneously be both creative and procedural. This cultural difference could explain why these items did not perform well in our sample.
+
+  iii) Lastly, this might indicate the multidimensional nature even within the belief about mathematics. While these items were intended to assess a single dimension, their extreme ease likely made them incapable of detecting the complexity of this construct, resulting in their inability to differentiate respondents across ability levels.
+
+
+  With the reasons being said, the four items are deleted due to poor functionality.
+
+# Model Iteration (Competing MIRT with different link function)
+
+With the new item set and 2pl approach, I'll re-construct competing models. Models with different link function - RSM/GRM/PCM - are tested. Based on its multidimensional structure, and 2pl choice, 6 models are constructed as bf-grsm, bf-grm, bf-gpcm; ct-grsm, ct-grm, ct-gpcm.
+
+```{r, echo=FALSE, results='hide'}
+# 新的items列表
+items_new <- c("Ba_5", "Ba_6", "Ba_7", "Ba_8",
+               "Bb_1_r", "Bb_2", "Bb_3_r", "Bb_4_r", "Bb_5", "Bb_6_r", "Bb_7_r", "Bb_8_r",
+               "Bb_9_r", "Bb_10_r", "Bb_11_r", "Bc_1_r", "Bc_2_r", "Bc_3", "Bc_4", "Bc_5")
+
+# 基于新items过滤数据
+long_data_collapsed_new <- long_data_collapsed %>%
+  filter(item %in% items_new)
+
+# Priors
+priors_ct_2pl <- c(
+    prior(normal(0, 3), class = "Intercept"),
+    prior(normal(0, 3), class = "sd", group = "item"),
+    prior(normal(0, 3), class = "sd", group = "person"),
+    prior(lkj(2), class = "cor", group = "person"),
+    prior(normal(0, 1), class = "sd", group = "item", dpar = "disc")
+)
+
+priors_bf_2pl <- c(
+    prior(normal(0, 3), class = "Intercept"),
+    prior(normal(0, 3), class = "sd", group = "item"),
+    prior(normal(0, 3), class = "sd", group = "person"),
+    prior(normal(0, 3), class = "sd", group = "person", coef = "dima"),
+    prior(normal(0, 3), class = "sd", group = "person", coef = "dimb"),
+    prior(normal(0, 3), class = "sd", group = "person", coef = "dimc"),
+    prior(normal(0, 1), class = "sd", group = "item", dpar = "disc")
+)
+
+# Model formulas - CT
+bf_ct_grsm_new <- bf(
+  response | weights(weight) ~ 1 + (1|i|item) + 
+  (0 + dima + dimb + dimc|person),
+  disc ~ 1 + (1 |i| item),
+  family = brmsfamily("acat", "logit")
+)
+
+bf_ct_grm_new <- bf(
+  response | weights(weight) ~ 1 + (1|i|item) + 
+  (0 + dima + dimb + dimc|person),
+  disc ~ 1 + (1 |i| item),
+  family = brmsfamily("cumulative", "logit")
+)
+
+bf_ct_gpcm_new <- bf(
+  response | weights(weight) ~ 1 + (cs(1)|i|item) + 
+  (0 + dima + dimb + dimc|person),
+  disc ~ 1 + (1 |i| item),
+  family = brmsfamily("acat", "logit")
+)
+
+# Model formulas - BF
+bf_bf_grsm_new <- bf(
+  response | weights(weight) ~ 1 + (1|i|item) + 
+    (1 | person) +
+    (0 + dima || person) +
+    (0 + dimb || person) +
+    (0 + dimc || person),
+  disc ~ 1 + (1 |i| item),
+  family = brmsfamily("acat", "logit")
+)
+
+bf_bf_grm_new <- bf(
+  response | weights(weight) ~ 1 + (1|i|item) + 
+    (1 | person) +
+    (0 + dima || person) +
+    (0 + dimb || person) +
+    (0 + dimc || person),
+  disc ~ 1 + (1 |i| item),
+  family = brmsfamily("cumulative", "logit")
+)
+
+bf_bf_gpcm_new <- bf(
+  response | weights(weight) ~ 1 + (cs(1)|i|item) +
+    (1|person) +
+    (0 + dima||person) +
+    (0 + dimb||person) +
+    (0 + dimc||person), 
+  disc ~ 1 + (1 |i| item),
+  family = brmsfamily("acat", "logit")
+)
+
+# Fit CT models
+fit_ct_grsm_new <- brm(
+  bf_ct_grsm_new,
+  data = long_data_collapsed_new,
+  prior = priors_ct_2pl,
+  chains = 4, cores = 4,
+  iter = 2000, warmup = 1000,
+  control = list(adapt_delta = 0.99, max_treedepth = 15),
+  file = "models/ct_grsm_new"
+)
+
+fit_ct_grm_new <- brm(
+  bf_ct_grm_new,
+  data = long_data_collapsed_new,
+  prior = priors_ct_2pl,
+  chains = 4, cores = 4,
+  iter = 2000, warmup = 1000,
+  control = list(adapt_delta = 0.99, max_treedepth = 15),
+  file = "models/ct_ggrm_new"
+)
+
+fit_ct_gpcm_new <- brm(
+  bf_ct_gpcm_new,
+  data = long_data_collapsed_new,
+  prior = priors_ct_2pl,
+  chains = 4, cores = 4,
+  iter = 2000, warmup = 1000,
+  control = list(adapt_delta = 0.99, max_treedepth = 15),
+  file = "models/ct_gpcm_new"
+)
+
+# Fit BF models
+fit_bf_grsm_new <- brm(
+  bf_bf_grsm_new,
+  data = long_data_collapsed_new,
+  prior = priors_bf_2pl,
+  chains = 4, cores = 4,
+  iter = 2000, warmup = 1000,
+  control = list(adapt_delta = 0.99, max_treedepth = 15),
+  file = "models/bf_grsm_new"
+)
+
+fit_bf_grm_new <- brm(
+  bf_bf_grm_new,
+  data = long_data_collapsed_new,
+  prior = priors_bf_2pl,
+  chains = 4, cores = 4,
+  iter = 2000, warmup = 1000,
+  control = list(adapt_delta = 0.99, max_treedepth = 15),
+  file = "models/bf_ggrm_new"
+)
+
+fit_bf_gpcm_new <- brm(
+  bf_bf_gpcm_new,
+  data = long_data_collapsed_new,
+  prior = priors_bf_2pl,
+  chains = 4, cores = 4,
+  iter = 2000, warmup = 1000,
+  control = list(adapt_delta = 0.99, max_treedepth = 15),
+  file = "models/bf_gpcm_new"
+)
+
+```
+
+## Loo check
+
+```{r}
+# 计算LOO
+loo_ct_grsm <- loo(fit_ct_grsm_new)
+loo_ct_grm <- loo(fit_ct_grm_new)
+loo_ct_gpcm <- loo(fit_ct_gpcm_new)
+loo_bf_grsm <- loo(fit_bf_grsm_new)
+loo_bf_grm <- loo(fit_bf_grm_new)
+loo_bf_gpcm <- loo(fit_bf_gpcm_new)
+
+# 模型比较
+model_comparison <- loo_compare(
+  loo_ct_grsm, loo_ct_grm, loo_ct_gpcm,
+  loo_bf_grsm, loo_bf_grm, loo_bf_gpcm
+)
+
+# Pareto k诊断
+pareto_k_summary <- data.frame(
+  Model = c("CT_GRSM", "CT_GRM", "CT_GPCM", 
+            "BF_GRSM", "BF_GRM", "BF_GPCM"),
+  High_K = c(
+    sum(loo_ct_grsm$diagnostics$pareto_k > 0.7),
+    sum(loo_ct_grm$diagnostics$pareto_k > 0.7),
+    sum(loo_ct_gpcm$diagnostics$pareto_k > 0.7),
+    sum(loo_bf_grsm$diagnostics$pareto_k > 0.7),
+    sum(loo_bf_grm$diagnostics$pareto_k > 0.7),
+    sum(loo_bf_gpcm$diagnostics$pareto_k > 0.7)
+  ),
+  Total_Obs = c(
+    length(loo_ct_grsm$diagnostics$pareto_k),
+    length(loo_ct_grm$diagnostics$pareto_k),
+    length(loo_ct_gpcm$diagnostics$pareto_k),
+    length(loo_bf_grsm$diagnostics$pareto_k),
+    length(loo_bf_grm$diagnostics$pareto_k),
+    length(loo_bf_gpcm$diagnostics$pareto_k)
+  )
+)
+
+pareto_k_summary$Low_K <- pareto_k_summary$Total_Obs - pareto_k_summary$High_K
+
+# p_loo比率
+p_loo_ratio <- data.frame(
+  Model = c("CT_GRSM", "CT_GRM", "CT_GPCM", 
+            "BF_GRSM", "BF_GRM", "BF_GPCM"),
+  P_loo = c(
+    loo_ct_grsm$estimates["p_loo", "Estimate"],
+    loo_ct_grm$estimates["p_loo", "Estimate"],
+    loo_ct_gpcm$estimates["p_loo", "Estimate"],
+    loo_bf_grsm$estimates["p_loo", "Estimate"],
+    loo_bf_grm$estimates["p_loo", "Estimate"],
+    loo_bf_gpcm$estimates["p_loo", "Estimate"]
+  )
+)
+
+p_loo_ratio$Parameters <- 203  # 实际参数数量
+p_loo_ratio$Ratio <- round(p_loo_ratio$P_loo / p_loo_ratio$Parameters, 3)
+
+# 输出结果
+print("Model comparison (LOO):")
+print(model_comparison, simplify = FALSE)
+
+print("\nPareto k diagnostic summary:")
+print(pareto_k_summary)
+
+print("\nP_loo to parameters ratio:")
+print(p_loo_ratio)
+```
+
+  According to the loo_check, we can see that CT/BF with same IRT structure still performance pretty similar, while for models of differnet linking function, GPCM works the best, followed by GRM, with GRSM at the end. This is also the order of P_loo, which suggest that more parameter is used for estimating the model, the more information it provides. While the downside is, more parameters will cause overfitting risk and the instability of the model.
+  The best model GPCMs (in LOO comparasion), are detected with 17/13 high K observations in BF/CT structure, considering the P-loo > p, this is a potential sign for over-fitting. GRM performance clearly better in terms of stability, with 1 high K in BF-GRM, 2 in CT-GRM.
+  Considering the major advantage - flexible threshold setting in PCM - is not necessary for my following analysis, I would prefer to give up a moderate amount of model information in PCM, for better stability in GRM, especially considering the difference in performance between the two models is not that large, with approximately 3\*se_diff.
+
+## Multidimensional Structure Check (ECV/FC)
+
+Due to we can't determine which multidimensional structure is better, I use further index to check their multidimensional assumption.
+
+        
+  ECV（Explained Common Variance）is used to check BF - it simply means how good the general latent trait can used to explain the sub-dimensions. We expect a not too high yet not too low score, means that general belief do make sense, but for each dimension, they have their own important sub-belief to explain the others. 
+  FC is used to check CT (factor correlations) - it represents the correlations between different dimension-specific factors. 
+
+
+Results shows that both works - FC among three CT models shows that three dimensions related with each other at a moderate level; ECV among three BF models shows that there is a general belief that could explain moderate but significant information of different dimensions.
+
+Considering the stability of GRM, and the theoretical compatibility (CT technically rejects the existence of general belief yet ECV proves the rationale of general belief in BF structure), I decided to take BF structure into final model.
+
+```{r}
+# Helper function for HDI formatting
+format_with_hdi <- function(mean_val, lower, upper, digits = 3) {
+  sprintf("%.3f [%.3f, %.3f]", mean_val, lower, upper)
+}
+
+# Calculate ECV for BF models
+calculate_ecv <- function(model) {
+  posterior <- as.data.frame(model)
+  
+  gen_var <- posterior$`sd_person__Intercept`^2
+  var_a <- posterior$`sd_person__dima`^2
+  var_b <- posterior$`sd_person__dimb`^2
+  var_c <- posterior$`sd_person__dimc`^2
+  
+  ecv_a <- gen_var / (gen_var + var_a)
+  ecv_b <- gen_var / (gen_var + var_b)
+  ecv_c <- gen_var / (gen_var + var_c)
+  
+  hdi_a <- bayestestR::hdi(ecv_a)
+  hdi_b <- bayestestR::hdi(ecv_b)
+  hdi_c <- bayestestR::hdi(ecv_c)
+  
+  list(
+    A = format_with_hdi(mean(ecv_a), hdi_a$CI_low, hdi_a$CI_high),
+    B = format_with_hdi(mean(ecv_b), hdi_b$CI_low, hdi_b$CI_high),
+    C = format_with_hdi(mean(ecv_c), hdi_c$CI_low, hdi_c$CI_high)
+  )
+}
+
+# Calculate factor correlations for CT models
+calculate_correlations <- function(model) {
+  posterior <- as.data.frame(model)
+  
+  cor_ab <- posterior$`cor_person__dima__dimb`
+  cor_ac <- posterior$`cor_person__dima__dimc`
+  cor_bc <- posterior$`cor_person__dimb__dimc`
+  
+  hdi_ab <- bayestestR::hdi(cor_ab)
+  hdi_ac <- bayestestR::hdi(cor_ac)
+  hdi_bc <- bayestestR::hdi(cor_bc)
+  
+  list(
+    AB = format_with_hdi(mean(cor_ab), hdi_ab$CI_low, hdi_ab$CI_high),
+    AC = format_with_hdi(mean(cor_ac), hdi_ac$CI_low, hdi_ac$CI_high),
+    BC = format_with_hdi(mean(cor_bc), hdi_bc$CI_low, hdi_bc$CI_high)
+  )
+}
+
+
+# Define models list
+models <- list(
+  "CT-GRSM" = fit_ct_grsm_new,
+  "CT-GRM" = fit_ct_grm_new,
+  "CT-GPCM" = fit_ct_gpcm_new,
+  "BF-GRSM" = fit_bf_grsm_new,
+  "BF-GRM" = fit_bf_grm_new,
+  "BF-GPCM" = fit_bf_gpcm_new
+)
+
+# Create results table
+results <- data.frame(Model = names(models))
+
+# Add BF ECV results
+bf_models <- models[grep("^BF-", names(models))]
+for(model_name in names(bf_models)) {
+  ecv <- calculate_ecv(bf_models[[model_name]])
+  results[results$Model == model_name, c("ECV_A", "ECV_B", "ECV_C")] <- unlist(ecv)
+}
+
+# Add CT correlations results
+ct_models <- models[grep("^CT-", names(models))]
+for(model_name in names(ct_models)) {
+  cors <- calculate_correlations(ct_models[[model_name]])
+  results[results$Model == model_name, c("FC_AB", "FC_AC", "FC_BC")] <- unlist(cors)
+}
+
+
+
+# Save results
+write.csv(results, "model_diagnostics.csv", row.names = FALSE)
+
+# Print results
+print(results)
+```
+
+# Final model choice
+
+  I finally choose to use bf structure, with 2pl approach, GRM linking function, thus combining bf-grm model. Here is the mmodel summary and the fit plot. 
+
+
+```{r}
+summary (fit_bf_grm_new)
+plot (fit_bf_grm_new)
+```
+
+## difficulty-discrimation map
+
+```{r}
+
+# Extract random effects
+ranef_grm <- ranef(fit_bf_grm_new)
+
+# Difficulty and discrimination data
+difficulty_data <- ranef_grm$item[,,"Intercept"] %>%
+ as_tibble(rownames = "item") %>%
+ mutate(item = factor(item, levels = item_order))
+
+discrimination_data <- exp(ranef_grm$item[,,"disc_Intercept"]) %>%
+ as_tibble(rownames = "item") %>%
+ mutate(item = factor(item, levels = item_order))
+
+# Create plots
+p1 <- ggplot(difficulty_data, aes(x = Estimate, y = item)) +
+ geom_point(size = 1.5, alpha = 0.8) +
+ geom_errorbarh(aes(xmin = Q2.5, xmax = Q97.5), height = 0.2, alpha = 0.6) +
+ labs(title = "BF-GRM: Item Difficulty", x = "Estimate", y = NULL)
+
+p2 <- ggplot(discrimination_data, aes(x = Estimate, y = item)) +
+ geom_point(size = 1.5, alpha = 0.8) +
+ geom_errorbarh(aes(xmin = Q2.5, xmax = Q97.5), height = 0.2, alpha = 0.6) +
+ labs(title = "BF-GRM: Item Discrimination", x = "Estimate", y = NULL)
+
+grm_comparison <- p1 | p2
+
+print(grm_comparison)
+
+
+```
+## ability map with general & dimension specific beliefs
+
+```{r}
+# Extract ranef and prepare data  
+ranef_grm <- ranef(fit_bf_grm_new)
+dims <- c("Intercept", "dima", "dimb", "dimc")
+titles <- c("General Dimension", "Dimension A", "Dimension B", "Dimension C")
+
+# Get range for all plots
+value_range <- range(sapply(dims, function(d) {
+  range(ranef_grm$person[,,d][,c("Q2.5","Q97.5")])
+}))
+
+# Create plots directly
+plots <- map2(dims, titles, ~{
+  ranef_grm$person[,,.x] %>%
+    as_tibble(rownames = "person") %>%
+    arrange(Estimate) %>%
+    mutate(id = row_number()) %>%
+    ggplot(aes(x = id, y = Estimate)) +
+    geom_pointrange(aes(ymin = Q2.5, ymax = Q97.5), alpha = 0.7, size = 0.3) +
+    coord_flip() +
+    labs(title = .y, x = "ID (sorted)", y = "Estimate") +
+    ylim(value_range) 
+})
+
+final_plot <- (plots[[1]] | plots[[2]]) / (plots[[3]] | plots[[4]])
+ggsave("grm_person_params.pdf", final_plot, width = 7, height = 5)
+print(final_plot)
+```
+
+ We can see several improvement in the iterations. Now we have clear three category thresholds, nice convergence (from good R hat and controlled k value), reasonable discrimination/difficulty/multidimensional ability distribution.
+ For the abilities - DimC shows the greatest stability, with the narrowest posterior intervals and minimal variability across individuals, indicating consistent beliefs about pedagogy within the group. General Belief and DimB are moderately stable, with slightly wider posterior intervals and minor individual-level uncertainty in DimB. In contrast, DimA displays the highest uncertainty, characterized by larger standard deviations across individuals, broader posterior intervals, and a few outliers with significantly divergent posterior distributions. This variability may be due to the questionnaire structure—after removing simpler items (A1–A4), the remaining DimA items are concentrated around higher difficulty levels (approximately +4), leading to less precise estimates for respondents. Additionally, beliefs about mathematics may inherently vary more across individuals and be less susceptible to group-level patterns, resulting in greater randomness in estimates.
+
+## Posterior-Mean Associations Across Dimensions
+
+```{r}
+# 获取posterior samples
+posterior_grm <- as.data.frame(fit_bf_grm_new)
+
+# Base theme
+base_theme <- theme(
+   axis.text = element_text(size = 9),
+   axis.title = element_blank()
+)
+
+unified_range <- c(-10, 10)
+
+# 散点图函数
+my_custom_scatter <- function(data, mapping, ...) {
+   x_var <- as_label(mapping$x)
+   y_var <- as_label(mapping$y)
+   
+   name_map <- c(
+       "General" = "Intercept",
+       "Dim.A" = "dima",
+       "Dim.B" = "dimb",
+       "Dim.C" = "dimc"
+   )
+   
+   x_pattern <- paste0("^r_person\\[.*,", name_map[x_var], "\\]")
+   y_pattern <- paste0("^r_person\\[.*,", name_map[y_var], "\\]")
+   
+   x_cols <- posterior_grm[, grep(x_pattern, colnames(posterior_grm))]
+   y_cols <- posterior_grm[, grep(y_pattern, colnames(posterior_grm))]
+   
+   correlation_data <- data.frame(
+       x_mean = colMeans(x_cols),
+       y_mean = colMeans(y_cols),
+       x_lower = apply(x_cols, 2, quantile, probs = 0.025),
+       x_upper = apply(x_cols, 2, quantile, probs = 0.975),
+       y_lower = apply(y_cols, 2, quantile, probs = 0.025),
+       y_upper = apply(y_cols, 2, quantile, probs = 0.975)
+   )
+   
+   ggplot(correlation_data, aes(x = x_mean, y = y_mean)) +
+       geom_errorbar(aes(ymin = y_lower, ymax = y_upper), width = 0, alpha = 0.2, color = "grey50") +
+       geom_errorbarh(aes(xmin = x_lower, xmax = x_upper), height = 0, alpha = 0.2, color = "grey50") +
+       geom_point(alpha = 0.4, size = 0.3, color = "grey20") +
+       geom_smooth(method = "lm", formula = y ~ x, color = "darkred", fill = "#FF000020", 
+                  alpha = 0.2, linetype = "dashed", size = 0.5, fullrange = TRUE) +
+       coord_cartesian(xlim = unified_range, ylim = unified_range) +
+       base_theme
+}
+
+# 密度图函数
+my_custom_diag <- function(data, mapping, ...) {
+   var_name <- as_label(mapping$x)
+   name_map <- c(
+       "General" = "Intercept",
+       "Dim.A" = "dima",
+       "Dim.B" = "dimb",
+       "Dim.C" = "dimc"
+   )
+   
+   pattern <- paste0("^r_person\\[.*,", name_map[var_name], "\\]")
+   posterior_values <- posterior_grm[, grep(pattern, colnames(posterior_grm))]
+   
+   ggplot(data.frame(x = as.vector(as.matrix(posterior_values))), aes(x = x)) +
+       geom_histogram(aes(y = after_stat(density)), fill = "black", color = "white", 
+                     bins = 30, alpha = 0.7) +
+       coord_cartesian(xlim = unified_range) +
+       scale_y_continuous(expand = c(0, 0)) +
+       base_theme
+}
+
+# 相关系数函数
+my_custom_cor <- function(data, mapping, ...) {
+   x_var <- as_label(mapping$x)
+   y_var <- as_label(mapping$y)
+   
+   name_map <- c(
+       "General" = "Intercept",
+       "Dim.A" = "dima",
+       "Dim.B" = "dimb",
+       "Dim.C" = "dimc"
+   )
+   
+   x_pattern <- paste0("^r_person\\[.*,", name_map[x_var], "\\]")
+   y_pattern <- paste0("^r_person\\[.*,", name_map[y_var], "\\]")
+   
+   x_cols <- posterior_grm[, grep(x_pattern, colnames(posterior_grm))]
+   y_cols <- posterior_grm[, grep(y_pattern, colnames(posterior_grm))]
+   
+   x_means <- colMeans(x_cols)
+   y_means <- colMeans(y_cols)
+   
+   r <- cor(x_means, y_means)
+   n <- length(x_means)
+   t_stat <- r * sqrt((n-2)/(1-r^2))
+   p_value <- 2 * pt(abs(t_stat), df = n-2, lower.tail = FALSE)
+   
+   stars <- ""
+   if (p_value < 0.001) stars <- "***"
+   else if (p_value < 0.01) stars <- "**"
+   else if (p_value < 0.05) stars <- "*"
+   
+   label <- sprintf("r = %.2f%s", r, stars)
+   
+   ggplot() +
+       annotate("text", x = 0.5, y = 0.5, label = label, size = 3) +
+       theme_void() +
+       xlim(0, 1) + ylim(0, 1)
+}
+
+# 准备数据
+plot_data <- data.frame(
+   General = colMeans(posterior_grm[, grep("^r_person\\[.*,Intercept\\]", colnames(posterior_grm))]),
+   Dim.A = colMeans(posterior_grm[, grep("^r_person\\[.*,dima\\]", colnames(posterior_grm))]),
+   Dim.B = colMeans(posterior_grm[, grep("^r_person\\[.*,dimb\\]", colnames(posterior_grm))]),
+   Dim.C = colMeans(posterior_grm[, grep("^r_person\\[.*,dimc\\]", colnames(posterior_grm))])
+)
+
+# 创建矩阵图
+matrix_plot <- ggpairs(
+   plot_data,
+   columnLabels = c("General", "Dim.A", "Dim.B", "Dim.C"),
+   lower = list(continuous = my_custom_scatter),
+   diag = list(continuous = my_custom_diag),
+   upper = list(continuous = my_custom_cor)
+) +
+   theme(
+       strip.text = element_text(size = 11, face = "bold"),
+       strip.background = element_blank(),
+       panel.spacing = unit(1, "mm")
+   )
+
+print(matrix_plot)
+```
+ 
+  In the bifactor structure, the General Factor and DimA, DimB, DimC are constrained to be orthogonal, meaning that, for example, DimA represents beliefs about mathematics after controlling for general inclusive beliefs. This plot shows simple regressions exploring associations between latent variables based on posterior mean estimates from 155 respondents. Overall, the results indicate the presence of a general inclusive belief: teachers who generally hold more inclusive beliefs tend to adopt more inclusive positions across all dimensions, with the strongest influence observed on beliefs about pedagogy (DimC), while the effects on beliefs about mathematics (DimA) and beliefs about learners (DimB) are moderate.
+
+  Interestingly, there is no statistical association between DimA and DimC, potentially reflecting the idea that teachers' beliefs about mathematics are less connected to their pedagogical beliefs. This could indicate that mathematical beliefs are perceived as more rigid or independent from pedagogical considerations. 
+  
+  Furthermore, DimB (beliefs about learners) shows moderate negative associations with both DimA and DimC, which might suggest a practical inclusive standpoint: teachers who strongly believe in equal opportunities for all learners to succeed in mathematics may, on the one hand, adopt a pragmatic view of schooling mathematics—seeing it as rigorous, binary (right or wrong), and procedural (DimA); on the other hand, they may place less emphasis on pedagogical innovation or view such innovation as secondary to ensuring equal access and opportunities (DimC). These associations suggest that a focus on inclusivity for learners might involve trade-offs in how teachers approach mathematical rigor and pedagogy.
+
+
+# Model DIF on Gender&District
+
+```{r, echo=FALSE, results='hide'}
+# Create demographic dataset with new items
+demographics_new <- instrument_clean %>%
+  mutate(
+    person = row_number(),
+    District = case_when(
+      Sch_ID == 0 ~ NA_character_,
+      TRUE ~ substr(as.character(Sch_ID), 1, 1)
+    ),
+    District = case_when(
+      District == "1" ~ "District1",
+      District == "2" ~ "District2",
+      District == "3" ~ "District3",
+      TRUE ~ NA_character_
+    ),
+    gender = case_when(
+      gender == 1 ~ "Male",
+      gender == 2 ~ "Female",
+      TRUE ~ NA_character_
+    ),
+    YearG = case_when(
+      YearG == 1 ~ "Year7",
+      YearG == 2 ~ "Year8",
+      YearG == 3 ~ "Year9",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  select(person, gender, YearG, District)
+
+# Create DIF dataset with new items
+long_data_dif_new <- long_data_collapsed_new %>%
+  left_join(demographics_new, by = "person") %>%
+  filter(!is.na(gender), !is.na(District))
+
+# Create BF-GRM DIF model
+bf_grm_dif_new <- bf(
+  response | weights(weight) ~ 
+    gender + YearG + District +
+    (1 || item) +                      
+    (0 + gender + District || item) +  
+    (1 | person) +
+    (0 + dima || person) +
+    (0 + dimb || person) +
+    (0 + dimc || person),
+  disc ~ 1 + (1|item),
+  family = brmsfamily("cumulative", "logit")
+)
+
+# Set priors
+priors_dif_new <- c(
+    prior(normal(0, 3), class = "b"),
+    prior(normal(0, 3), class = "sd", group = "item"),
+    prior(normal(0, 1), class = "sd", group = "item", dpar = "disc"),
+    prior(normal(0, 3), class = "sd", group = "person"),
+    prior(normal(0, 3), class = "sd", group = "person", coef = "dima"),
+    prior(normal(0, 3), class = "sd", group = "person", coef = "dimb"),
+    prior(normal(0, 3), class = "sd", group = "person", coef = "dimc")
+)
+
+# Fit model
+fit_bf_grm_dif_new <- brm(
+  bf_grm_dif_new,
+  data = long_data_dif_new,
+  prior = priors_dif_new,
+  chains = 4,
+  cores = 4,
+  iter = 2000,
+  warmup = 1000,
+  control = list(adapt_delta = 0.99, max_treedepth = 15),
+  file = "models/bf_ggrm_dif_new"
+)
+```
+
+```{r}
+summary (fit_bf_grm_dif_new)
+```
+
+
+
+  Based on the final model, I iterate a DIF version to include gender/yeargroup/district in fixed effects, and gender/districts in item random effects. The results shows their is a marginal uniform DIF on gender - that controlling other variables, male will generally performance 1.30 digit (log-odd scale, [-2.8, -0.04]) worse than female. While the upper bound of CI is nearly zero (-0.04), suggesting a highly uncertainty; Also a marginal uniform DIF on district - that the district of the least SES (district 3) perform 1.37 digit (log-odd scale, [-2.97, -0.04]) worse than district 1 (baseline, of highest SES). 
+  The DIF actually make sense - that male tends to hold a more exclusive belief (resonate with literature); while those teachers from lower SES areas are also with more exclusive beliefs, might because they are facing  greater pressure to competition and lack the necessary resources and support for inclusion. *Though these findings are marginal.*
+
+## Visualising uniform DIF
+
+```{r}
+conditional_effects(fit_bf_grm_dif_new,effects = "gender", categorical = TRUE)
+conditional_effects(fit_bf_grm_dif_new,effects = "District", categorical = TRUE)
+```
+  
+  The differences on the log scale are relatively harder to interpret, while these figures provide a more intuitive visualization of how teachers from different genders and districts endorse various response categories. From the first figure, we can observe that male teachers are less likely than female teachers to endorse higher categories (3 and 4, representing "agree" and "strongly agree") and more likely to select lower categories (1 and 2, representing "disagree" and "neutral"). A similar tendency is observed in the second figure, where teachers from District 3, associated with lower SES, show a lower probability of endorsing higher categories and a higher probability of selecting lower categories compared to teachers from Districts 1 and 2, which are associated with higher SES.
+
+## Item-level DIF
+  While in item-level, the marginal uniform DIF is faded by various items. None of the items showed significant group differences, and all the posteriors of group differences for the items spanned 0. Still, there are some items worth further investigation for gender differences, though here we don't have enough statistical evidence to assert: 
+  1. bc_5 & ba_7 are the two items with the strongest male advantage tendency, and they also point to the discussion of practical problems in mathematics classes – a kind of contextualisation of mathematics. This may indicate the advantage and tendency of male teachers in this regard.
+  2. bb_9 and bb_3 are the two items with the strongest female advantage tendencies. Specifically, bb_9 addresses gender aptitude stereotypes, where female teachers are more likely to disagree with or challenge the notion that mathematical ability is inherently tied to gender. This suggests that female teachers might be more aware of or sensitive to the negative impacts of such stereotypes and more inclined to foster an equitable learning environment. Similarly, bb_3, which relates to the use of non-standard methods for solving mathematical problems, highlights female teachers' openness to diverse problem-solving approaches.
+  
+ Though these are quite interesting tendencies, the model does not provide strong enough evidence to draw definitive conclusions.
+
+```{r}
+# Extract random effects from DIF model
+ranef_grm_dif <- ranef(fit_bf_grm_dif_new)
+
+# Gender DIF effects
+gender_effects <- ranef_grm_dif$item[,,"genderFemale"] %>%
+ as_tibble(rownames = "item") %>%
+ mutate(item = factor(item, levels = item_order))
+
+# District DIF effects 
+district_effects <- bind_rows(
+ as_tibble(ranef_grm_dif$item[,,"DistrictDistrict2"], rownames = "item") %>% 
+   mutate(district = "District2"),
+ as_tibble(ranef_grm_dif$item[,,"DistrictDistrict3"], rownames = "item") %>% 
+   mutate(district = "District3")
+) %>%
+ mutate(item = factor(item, levels = item_order))
+
+# Create plots
+p1 <- ggplot(gender_effects, aes(x = Estimate, y = item)) +
+ geom_vline(xintercept = 0, linetype = "dashed", color = "gray50") +
+ geom_point(size = 1.5, alpha = 0.8) +
+ geom_errorbarh(aes(xmin = Q2.5, xmax = Q97.5), height = 0.2, alpha = 0.6) +
+ labs(title = "Gender DIF Effects", x = "Effect Size Male vs Female (baseline)", y = NULL)
+
+p2 <- ggplot(district_effects, aes(x = Estimate, y = item, color = district)) +
+ geom_vline(xintercept = 0, linetype = "dashed", color = "gray50") +
+ geom_point(position = position_dodge(width = 0.5), size = 1.5) +
+ geom_errorbarh(aes(xmin = Q2.5, xmax = Q97.5),
+                position = position_dodge(width = 0.5),
+                height = 0.2, alpha = 0.6) +
+ labs(title = "District DIF Effects", x = "Effect Size (vs District1)", y = NULL) 
+ 
+
+dif_plots <- p1 | p2
+ggsave("dif_effects.pdf", dif_plots, width = 10, height = 12, dpi = 300)
+print(dif_plots)
+```
