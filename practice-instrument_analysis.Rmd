@@ -1,0 +1,1122 @@
+---
+title: "IRT for teacher's practice"
+author: "Chi Zhang"
+date: "2025-01-30"
+output: 
+  pdf_document:
+    latex_engine: xelatex
+  html_document: default
+  word_document: default
+
+editor_options:
+  markdown:
+    wrap: sentence
+---
+
+
+```{r, echo=FALSE, results='hide', warning = FALSE, message = FALSE }
+# Clear environment 
+rm(list = ls())
+
+knitr::opts_knit$set(global.replacements = list("（" = "(", "）" = ")"))
+
+# Setting basic knitr options
+knitr::opts_chunk$set(
+  echo = FALSE,  # Don't show code in output
+  warning = FALSE,  # Don't show warnings
+  message = FALSE  # Don't show messages
+)
+
+
+rm(list = ls())
+library(brms)
+library(tidyverse)
+library(GGally)
+library(viridis)
+library(gridExtra)
+library(ggridges)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(bayesplot)
+library(bayestestR)
+library(extrafont)
+library(DiagrammeR)
+library(readxl)
+library(patchwork)
+
+#ggplot theme setting...
+theme_set(bayesplot::theme_default())
+
+#Rstan setting...
+rstan::rstan_options(auto_write = TRUE)
+options(mc.cores = 4) # for running 4 chains
+
+# Set ggplot theme
+theme_set(bayesplot::theme_default())
+```
+
+# The items and the responses
+
+|     |                                                                                                                             |
+| --- | --------------------------------------------------------------------------------------------------------------------------- |
+| 1   | I introduce a new topic by first determining what the students already know about it.                                       |
+| 2   | I offer content matter in gradually increasing levels of complexity.                                                        |
+| 3   | I jump between topics as the needs arise.                                                                                   |
+| 4   | I have my students work collaboratively in pairs.                                                                           |
+| 5   | I have my students work collaboratively in groups.                                                                          |
+| 6   | I teach each student differently according to individual needs.                                                             |
+| 7   | I encourage students to discuss the mistake they make.                                                                      |
+| 8   | Students work on extended mathematics investigations or projects.                                                           |
+| 9   | Students work on projects in which subject material from various subjects is integrated.                                    |
+| 10  | Students make formal presentations to the rest of the class.                                                                |
+| 11  | Students start with easy questions and work up to hard questions.                                                           |
+| 12  | Students use mathematics concepts to interpret and solve applied problems.                                                  |
+| 13  | Students play mathematical games.                                                                                           |
+| 14  | Students work through exercises from textbooks or worksheets.                                                               |
+| 15  | Students work on their own, consulting a neighbour from time to time.                                                       |
+| 16  | I choose examples that appeal to students.                                                                                  |
+| 17  | I try to indicate the value of each lesson topic for future use.                                                            |
+| 18  | I encourage students to make connections to mathematical concepts that may be encountered in other areas of the curriculum. |
+| 19  | When a student asks a question, I give a clue instead of the correct answer.                                                |
+| 20  | Students use only the methods I teach them.                                                                                 |
+| 21  | During instruction I ask a lot of short questions to check whether students understand the content matter.                  |
+| 22  | I ask students to explain their reasoning when giving an answer.                                                            |
+| 23  | I encourage students to explore alternative methods for solution.                                                           |
+| 24  | I avoid students making mistakes by explaining things carefully first.                                                      |
+| 25  | I go through only one method for doing each question.                                                                       |
+| 26  | I allow students to work at their own pace.                                                                                 |
+
+
+This questionnniare is designed for assessing teacher's pedagogic practice, whether with connectionist/transmissionist tendency. Teachers were asked to response this on a 'frequency scale' manner, with 1-never, 2-seldom, 3-around half of the time, 4 - usually, 5 - almost always. There are items with reversed wording, so I first reversely code these items and see the whole response distribution. 
+
+
+```{r ,echo=FALSE, results='hide'}
+
+# 读取原始数据
+original_instrument <- read_excel("~/Desktop/R - project/belief-practice/dataset/original_instrument.xlsx")
+
+# 定义reverse_score函数来处理反向计分
+# 修改函数以处理空值
+reverse_score <- function(x) {
+  ifelse(is.na(x) | x == 0 | x == "", NA, 6 - x)
+}
+
+# 定义处理空值和0的函数
+convert_to_na <- function(x) {
+  ifelse(is.na(x) | x == 0 | x == "", NA_real_, x)
+}
+
+# 数据处理主流程
+processed_data <- original_instrument %>%
+  # 添加序号ID
+  mutate(id = row_number()) %>%
+  
+  # 处理demographic变量中的0值和空值
+  mutate(
+    gender = convert_to_na(gender),
+    YearG = convert_to_na(YearG),
+    District = convert_to_na(District)
+  ) %>%
+  
+  # 处理items
+  mutate(
+    # 常规题目（0和空值转NA）
+    P_1 = convert_to_na(P_1),
+    P_3 = convert_to_na(P_3),
+    P_4 = convert_to_na(P_4),
+    P_5 = convert_to_na(P_5),
+    P_6 = convert_to_na(P_6),
+    P_7 = convert_to_na(P_7),
+    P_8 = convert_to_na(P_8),
+    P_9 = convert_to_na(P_9),
+    P_10 = convert_to_na(P_10),
+    P_12 = convert_to_na(P_12),
+    P_13 = convert_to_na(P_13),
+    P_16 = convert_to_na(P_16),
+    P_17 = convert_to_na(P_17),
+    P_18 = convert_to_na(P_18),
+    P_19 = convert_to_na(P_19),
+    P_22 = convert_to_na(P_22),
+    P_23 = convert_to_na(P_23),
+    P_26 = convert_to_na(P_26),
+    
+    # 反向计分题目（0和空值转NA）
+    P_2_r = reverse_score(P_2),
+    P_11_r = reverse_score(P_11),
+    P_14_r = reverse_score(P_14),
+    P_15_r = reverse_score(P_15),
+    P_20_r = reverse_score(P_20),
+    P_21_r = reverse_score(P_21),
+    P_24_r = reverse_score(P_24),
+    P_25_r = reverse_score(P_25)
+  ) %>%
+  # 移除原始反向计分题目
+  select(id, gender, YearG, District, 
+         P_1, P_2_r, P_3, P_4, P_5, P_6, P_7, P_8, P_9, P_10, 
+         P_11_r, P_12, P_13, P_14_r, P_15_r, P_16, P_17, P_18, P_19,
+         P_20_r, P_21_r, P_22, P_23, P_24_r, P_25_r, P_26)
+
+# 检查数据处理结果
+print("数据结构:")
+str(processed_data)
+print("\n前几行数据:")
+head(processed_data)
+
+# 缺失值分析
+missing_analysis <- processed_data %>%
+  summarise(across(everything(), ~sum(is.na(.)))) %>%
+  pivot_longer(everything(), 
+               names_to = "Variable", 
+               values_to = "Missing_Count") %>%
+  mutate(Missing_Percentage = Missing_Count / nrow(processed_data) * 100)
+print("\n缺失值分析:")
+print(missing_analysis)
+
+# 检查数值范围
+value_range <- processed_data %>%
+  select(-id) %>%
+  summarise(across(everything(),
+                  list(min = ~min(., na.rm = TRUE),
+                       max = ~max(., na.rm = TRUE))))
+print("\n数值范围检查:")
+print(value_range)
+
+# 保存处理后的数据
+write.csv(processed_data, "processed_practice_items.csv", row.names = FALSE)
+
+
+```
+
+```{r,echo=FALSE}
+# 定义items向量，确保正确的顺序
+items_26 <- c("P_1", "P_2_r", "P_3", "P_4", "P_5", "P_6", "P_7", "P_8", "P_9", 
+           "P_10", "P_11_r", "P_12", "P_13", "P_14_r", "P_15_r", "P_16", 
+           "P_17", "P_18", "P_19", "P_20_r", "P_21_r", "P_22", "P_23", 
+           "P_24_r", "P_25_r", "P_26")
+items<- items_26
+
+# 修改响应计数函数，让NA值也能显示
+count_responses <- function(data, items) {
+  response_counts <- map_dfr(items, function(item) {
+    # 将数据转换为factor，包括NA
+    responses <- data[[item]]
+    # 创建包含NA的factor levels
+    all_categories <- c("1", "2", "3", "4", "5", "NA")
+    
+    # 计算NA的数量
+    na_count <- sum(is.na(responses))
+    
+    # 计算非NA值的计数
+    non_na_counts <- table(factor(responses[!is.na(responses)], 
+                                levels = all_categories[all_categories != "NA"]))
+    
+    # 合并计数结果
+    counts <- c(as.numeric(non_na_counts), na_count)
+    names(counts) <- all_categories
+    
+    data.frame(
+      item = rep(item, length(all_categories)),
+      category = all_categories,
+      count = as.numeric(counts)
+    )
+  })
+  return(response_counts)
+}
+
+# 获取响应计数
+response_counts <- count_responses(processed_data, items)
+
+# 计算百分比
+response_counts <- response_counts %>%
+  group_by(item) %>%
+  mutate(
+    percentage = count / sum(count) * 100,
+    # 确保item按照定义的顺序排序
+    item = factor(item, levels = items)
+  )
+
+# 创建响应分布图
+resp_dist <- ggplot(response_counts, aes(x = category, y = percentage)) +
+  geom_col(fill = "black", width = 0.7) +
+  facet_wrap(~item, ncol = 6) +
+  labs(
+    x = "Response Category",
+    y = "Percentage (%)"
+  ) +
+  scale_y_continuous(
+    limits = c(0, 100),
+    expand = c(0, 0)
+  ) +
+  theme_minimal() +
+  theme(
+    text = element_text(family = "sans", size = 8),
+    axis.text = element_text(family = "sans", size = 8),
+    strip.text = element_text(family = "sans", size = 8),
+    legend.position = "none",
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.title = element_text(family = "sans", size = 8),
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 0.5)
+  ) +
+  scale_x_discrete(expand = c(0.1, 0.1))
+
+
+# 显示图形
+print(resp_dist)
+```
+
+```{r, echo=FALSE, results='hide'}
+# 检查完全缺失的类别
+missing_categories <- response_counts %>%
+  filter(category %in% c("1", "2", "3", "4", "5") & count == 0) %>%
+  select(item, category)
+print("\n完全缺失的响应类别:")
+print(missing_categories)
+
+# 检查缺失过多items的参与者
+missing_participants <- processed_data %>%
+  mutate(
+    missing_count = rowSums(is.na(select(., all_of(items)))),
+    missing_percentage = missing_count / length(items) * 100
+  ) %>%
+  filter(missing_count > length(items)/2) %>%  # 缺失超过一半
+  select(id, missing_count, missing_percentage) %>%
+  arrange(desc(missing_count))
+
+print("\n缺失超过10items的参与者:")
+print(missing_participants)
+```
+The distribution seems 'OK'. It is not too bad as it has a reasonable distribution overall, but not too good as some items missing certain category ('1' or '5'). It is still acceptable considering our sample size is small. Another concern is that the category '3 - around half of the time' seems not establish a 'ordered' distinction among others - many items with a 'wave' distribution where '2' and '4' are more likely to be endoresed than '3'. For now, we keep this original settings, but will come back to this issue later.
+Also there are three respondents miss more than 10 items. I'll use the same weighted penalty strategy to treat this.
+
+```{r,echo=FALSE, results='hide'}
+create_stepped_weights <- function(missing_count) {
+  base_threshold <- 10  
+  step_size <- 2       
+  decay_rate <- 3      
+  
+  if (missing_count >= 24) {
+    return(0.0)
+  }
+  if (missing_count < base_threshold) {
+    return(1.0)
+  }
+  
+  step_level <- floor((missing_count - base_threshold) / step_size)
+  weight <- exp(-decay_rate * (step_level * step_size / 24))
+  weight <- round(weight, 1)
+  
+  return(weight)
+}
+```
+
+
+# Foundational RSM model
+```{r,echo=FALSE, results='hide'}
+
+# 1. 计算每个人的权重
+missing_weights <- processed_data %>%
+  mutate(person = row_number()) %>%
+  select(person, all_of(items)) %>%
+  rowwise() %>%
+  mutate(
+    missing_count = sum(is.na(c_across(all_of(items)))),
+    weight = create_stepped_weights(missing_count)
+  ) %>%
+  ungroup()
+
+# 2. 创建带权重的长格式数据
+long_data_weighted <- processed_data %>%
+  mutate(person = row_number()) %>%
+  select(person, all_of(items)) %>%
+  pivot_longer(
+    cols = all_of(items),
+    names_to = "item",
+    values_to = "response"
+  ) %>%
+  # 加入权重
+  left_join(
+    missing_weights %>% select(person, weight),
+    by = "person"
+  )
+
+# 3. 设置先验分布（保持不变）
+priors <- c(
+  prior(normal(0, 3), class = "sd", group = "item"),
+  prior(normal(0, 3), class = "sd", group = "person")
+)
+
+# 4. 定义并拟合带权重的RSM模型
+bf_w_rsm <- bf(
+  response | weights(weight) ~ 1 + (1|item) + (1|person),
+  family = brmsfamily("acat", "logit")
+)
+
+fit_w_rsm <- brm(
+  bf_w_rsm,
+  data = long_data_weighted,
+  prior = priors,
+  chains = 4,
+  cores = 4,
+  iter = 2000,
+  warmup = 1000,
+  control = list(adapt_delta = 0.95),
+  file = "models/weighted_rsm"
+)
+```
+
+
+
+
+```{r}
+# 5. 查看模型结果
+print("Model Summary:")
+summary(fit_w_rsm)
+
+print("\nModel Plot:")
+plot(fit_w_rsm)
+
+```
+```{r}
+ranef_w_rsm <- ranef(fit_w_rsm)
+
+# Create data frame with correct item order
+item_data <- ranef_w_rsm$item[, , "Intercept"] %>%
+ as_tibble(rownames = "item") %>%
+ mutate(item = factor(item, levels = c(
+   "P_1", "P_2_r", "P_3", "P_4", "P_5", "P_6", "P_7", "P_8", "P_9", 
+   "P_10", "P_11_r", "P_12", "P_13", "P_14_r", "P_15_r", "P_16", 
+   "P_17", "P_18", "P_19", "P_20_r", "P_21_r", "P_22", "P_23", 
+   "P_24_r", "P_25_r", "P_26"
+ )))
+
+# Create plots
+p1 <- ggplot(item_data, aes(x = Estimate, y = item)) +
+ geom_point(size = 1.5) +
+ geom_errorbarh(aes(xmin = Q2.5, xmax = Q97.5), height = 0.2) +
+ labs(title = "Item Difficulty", x = "Estimate", y = NULL)
+
+p2 <- ranef_w_rsm$person[, , "Intercept"] %>%
+ as_tibble() %>%
+ rownames_to_column("person") %>%
+ arrange(Estimate) %>%
+ mutate(id = row_number()) %>%
+ ggplot(aes(x = Estimate, y = id)) +
+ geom_pointrange(aes(xmin = Q2.5, xmax = Q97.5), size = 0.3) +
+ labs(title = "Person Parameters", x = "Estimate", y = "ID (sorted)")
+
+ability_map <- p1 | p2
+print(ability_map)
+```
+
+
+Starting from very basic 1PL setting - rsm, the difficulty/ability plot seems reasonable. But we can see that among several thresholds, 2 and 3 are reversed. There means that the difficulty/probability from transcending 2-3, is even harder than transcending from 3-4. This is problematic. Potential reasons can be teachers can't tell the ordered implications within these categogries - especially 3 is a category with explicit frequency referring (half of the time), while others are more like the vague feeling/perception of frequency.
+In any case, I would like to maintain the original category settings and see whether we can use differnet IRT structures to solve the problem. 
+## Introducing discrimination - GRSM model (2PL) 
+
+```{r,echo=FALSE, results='hide'}
+
+# 3. 设置先验
+priors_grsm <- c(
+  prior(normal(0, 3), class = "Intercept"),
+  prior(normal(0, 3), class = "sd", group = "item"),
+  prior(normal(0, 3), class = "sd", group = "person"),
+  prior(normal(0, 1), class = "sd", group = "item", dpar = "disc")
+)
+
+# 4. 定义并拟合GRSM
+bf_grsm <- bf(
+  response ~ 1 + (1|i|item) + (1|person),
+  disc ~ 1 + (1|i|item),
+  family = brmsfamily("acat", "logit")
+)
+
+fit_grsm <- brm(
+  bf_grsm,
+  data = long_data_weighted,
+  prior = priors_grsm,
+  chains = 4,
+  cores = 4,
+  iter = 2000,
+  warmup = 1000,
+  control = list(adapt_delta = 0.99, max_treedepth = 15),
+  file = "models/basic_grsm"
+)
+```
+### GRSM model summary 
+
+In the model summary, we can see that bringing discrimination parameter in even makes the gap between threshold 2&3 bigger. We might admit the threshold reverse is something inherint in the dataset, where partcipants failed to distinguish the order of the categories, or more likely, they failed to identify category 3 properly here. 
+
+
+```{r}
+summary(fit_grsm)
+```
+### GRSM difficulty/discrimination map
+
+```{r}
+ranef_grsm <- ranef(fit_grsm)
+
+# Difficulty data
+difficulty_data <- ranef_grsm$item[, , "Intercept"] %>%
+ as_tibble(rownames = "item") %>%
+ mutate(item = factor(item, levels = items_26))
+
+# Discrimination data 
+discrimination_data <- ranef_grsm$item[, , "disc_Intercept"] %>%
+ exp() %>%
+ as_tibble(rownames = "item") %>%
+ mutate(item = factor(item, levels = items_26))
+
+# Plots
+plot_diff <- ggplot(difficulty_data, aes(x = Estimate, y = item)) +
+ geom_point(size = 1.5) +
+ geom_errorbarh(aes(xmin = Q2.5, xmax = Q97.5), height = 0.2) +
+ labs(title = "Item Difficulty", x = "Estimate", y = NULL)
+
+plot_disc <- ggplot(discrimination_data, aes(x = Estimate, y = item)) +
+ geom_vline(xintercept = 0.5, linetype = "dashed", color = "gray50") +
+ geom_point(size = 1.5) +
+ geom_errorbarh(aes(xmin = Q2.5, xmax = Q97.5), height = 0.2) +
+ labs(title = "Item Discrimination", x = "Estimate", y = NULL)
+
+combined_plot <- plot_diff | plot_disc
+print(combined_plot)
+
+```
+Some interesting results in discrimination plot also tell us the reversed items works unwell for our sample. take a look on them:
+
+| #   | Item Description                                                                               |
+|---- |-------------------------------------------------------------------------------------------------|
+| 2   | I offer content matter in gradually increasing levels of complexity.                           |
+| 11  | Students start with easy questions and work up to hard questions.                              |
+| 14  | Students work through exercises from textbooks or worksheets.                                  |
+| 15  | Students work on their own, consulting a neighbour from time to time.                          |
+| 20  | Students use only the methods I teach them.                                                    |
+| 21  | During instruction I ask a lot of short questions to check whether students understand the content matter. |
+| 24  | I avoid students making mistakes by explaining things carefully first.                         |
+| 25  | I go through only one method for doing each question.                                          |
+
+Basically, these items are used to assess teachers' transmissionist practice. Implicitly in this questionanire assumption, we assume that transmissionism and connectionnism are at the two end of a linear specturm, thus the more frequently teachers practice these, the more likely they are less connectionist. But here, it seems like all these transmissionist items have weak discrimination (taking 0.5 as a warning threshold) - that they can't function properly on distinguishing teachers' connectionnist tendency, that perhaps even though teachers with high connectionist score will still frequnetly condcut these transmissionist practices, and vice versa.
+
+# Model Iteration (category collapse)
+
+Let's first solve the category reversing problem. I choose to collapse category 3 into 4, thus we have a new category as 'usually (around of more than half of the time)'. Technically it is also OK to integrate 2 and 3, but 'around half of the time' is sort of expression that closer to often/usually, linguistically people hardly regard 'half of the time' as 'seldom'.
+
+
+```{r,echo=FALSE, results='hide'}
+# 1. 定义完整的26个items
+items_26 <- c("P_1", "P_2_r", "P_3", "P_4", "P_5", "P_6", "P_7", "P_8", "P_9", 
+           "P_10", "P_11_r", "P_12", "P_13", "P_14_r", "P_15_r", "P_16", 
+           "P_17", "P_18", "P_19", "P_20_r", "P_21_r", "P_22", "P_23", 
+           "P_24_r", "P_25_r", "P_26")
+
+# 2. 定义recode函数，把3和4合并
+recode_response <- function(x) {
+  case_when(
+    x == 0 ~ NA_real_,  # 处理缺失值
+    x == 1 ~ 1,
+    x == 2 ~ 2,
+    x == 3 ~ 3,
+    x == 4 ~ 3,
+    x == 5 ~ 4,
+    TRUE ~ NA_real_
+  )
+}
+
+# 3. 计算权重
+missing_weights <- processed_data %>%
+  mutate(person = row_number()) %>%
+  select(person, all_of(items_26)) %>%  # 保留person列
+  rowwise() %>%
+  mutate(
+    missing_count = sum(is.na(c_across(-person))),  # 排除person列
+    weight = create_stepped_weights(missing_count)
+  ) %>%
+  select(person, weight) %>%  # 只保留需要的列
+  ungroup()
+
+# 4. 创建新的数据集并应用recode
+processed_data_merged <- processed_data %>%
+  select(all_of(items_26)) %>%
+  mutate(across(everything(), recode_response))
+
+# 5. 创建带权重的长格式数据
+long_data_merged <- processed_data_merged %>%
+  mutate(person = row_number()) %>%
+  pivot_longer(
+    cols = all_of(items_26),
+    names_to = "item",
+    values_to = "response"
+  ) %>%
+  # 加入权重
+  left_join(missing_weights, by = "person")
+
+# 6. 拟合带权重的GRSM
+bf_grsm_merged_w <- bf(
+ response | weights(weight) ~ 1 + (1|i|item) + (1|person),
+ disc ~ 1 + (1|i|item),
+ family = brmsfamily("acat", "logit")
+)
+
+fit_grsm_merged <- brm(
+ bf_grsm_merged_w,
+ data = long_data_merged,
+ prior = priors_grsm,  # 使用之前的先验
+ chains = 4,
+ cores = 4,
+ iter = 2000,
+ warmup = 1000,
+ control = list(adapt_delta = 0.99, max_treedepth = 15),
+ file = "models/fit_grsm_merged"
+)
+```
+
+
+## GRSM_Merged stats
+
+```{r}
+summary (fit_grsm_merged)
+```
+
+### GRSM_Merged difficulty/discrimination map
+
+```{r}
+# Extract random effects
+ranef_grsm <- ranef(fit_grsm_merged)
+
+# Difficulty data 
+difficulty_data <- ranef_grsm$item[, , "Intercept"] %>%
+  as_tibble(rownames = "item") %>%
+  mutate(item = factor(item, levels = items_26))
+
+# Discrimination data
+discrimination_data <- ranef_grsm$item[, , "disc_Intercept"] %>%
+  exp() %>% # Transform from log scale
+  as_tibble(rownames = "item") %>%
+  mutate(item = factor(item, levels = items_26))
+
+# Create plots with consistent theme
+plot_theme <- theme_minimal() +
+  theme(
+    panel.grid = element_blank(),
+    axis.line = element_line(color = "black"),
+    text = element_text(family = "sans", size = 8),
+    axis.text = element_text(size = 8),
+    axis.title = element_text(size = 8),
+    plot.title = element_text(size = 8, hjust = 0.5),
+    panel.border = element_blank()
+  )
+
+# Difficulty plot
+plot_diff <- ggplot(difficulty_data, aes(x = Estimate, y = item)) +
+  geom_point(size = 1.5) +
+  geom_errorbarh(aes(xmin = Q2.5, xmax = Q97.5), height = 0.2) +
+  labs(title = "Item Difficulty", x = "Estimate", y = NULL) 
+
+# Discrimination plot 
+plot_disc <- ggplot(discrimination_data, aes(x = Estimate, y = item)) +
+  geom_vline(xintercept = 0.5, linetype = "dashed", color = "gray50") +
+  geom_point(size = 1.5) +
+  geom_errorbarh(aes(xmin = Q2.5, xmax = Q97.5), height = 0.2) +
+  labs(title = "Item Discrimination", x = "Estimate", y = NULL)
+
+# Combine plots
+combined_plot <- plot_diff | plot_disc
+
+print(combined_plot)
+```
+After collapsing the categories, the output looks better - now the models has three ordered threshold with reasonable step-length, and the discrimination looks better. I'll try to maintain the collapsed setting and test the alternative IRT choices, i.e. GPCM (which provides flexible threshold within items), GRM (which with a different linking function forcing a ordered threshold setting), and PCM (if the item discrimination don't differ that much, PCM is a simpler version of GPCM and might works better for less parameters.) 
+
+# Model Iteration (competing IRTs)
+```{r,echo=FALSE, results='hide'}
+# 1. 拟合GRM (Graded Response Model)
+bf_grm_merged <- bf(
+  response|weights(weight) ~ 1 + (1|i|item) + (1|person),
+  disc ~ 1 + (1|i|item),
+  family = brmsfamily("cumulative", "logit")  # GRM使用cumulative link
+)
+
+fit_grm_merged <- brm(
+  bf_grm_merged,
+  data = long_data_merged,
+  prior = priors_grsm,  # 使用相同的先验
+  chains = 4,
+  cores = 4,
+  iter = 2000,
+  warmup = 1000,
+  control = list(adapt_delta = 0.99, max_treedepth = 15),
+  file = "models/fit_grm_26items_merged"
+)
+
+# 2. 拟合GPCM (Generalized Partial Credit Model)
+bf_gpcm_merged <- bf(
+  response | weights(weight) ~ 1 + (cs(1)|i|item) + (1|person),  # GPCM使用cs()函数
+  disc ~ 1 + (1|i|item),
+  family = brmsfamily("acat", "logit")
+)
+
+fit_gpcm_merged <- brm(
+  bf_gpcm_merged,
+  data = long_data_merged,
+  prior = priors_grsm,
+  chains = 4,
+  cores = 4,
+  iter = 2000,
+  warmup = 1000,
+  control = list(adapt_delta = 0.99, max_treedepth = 15),
+  file = "models/fit_gpcm_26items_merged"
+)
+
+bf_pcm_merged <- bf(
+  response | weights(weight) ~ 1 + (cs(1)|i|item) + (1|person),  # GPCM使用cs()函数
+  family = brmsfamily("acat", "logit")
+)
+
+fit_pcm_merged <- brm(
+  bf_gpcm_merged,
+  data = long_data_merged,
+  prior = priors,
+  chains = 4,
+  cores = 4,
+  iter = 2000,
+  warmup = 1000,
+  control = list(adapt_delta = 0.99, max_treedepth = 15),
+  file = "models/fit_pcm_26items_merged"
+)
+
+
+```
+
+## Model Comparasion (grsm vs grm vs gpcm vs pcm)
+```{r}
+summary(fit_gpcm_merged)
+summary(fit_grm_merged)
+summary(fit_pcm_merged)
+```
+```{r}
+
+loo_m_grm   <- loo(fit_grm_merged)
+loo_m_gpcm   <- loo(fit_gpcm_merged)
+loo_m_grsm   <- loo(fit_grsm_merged)
+loo_m_pcm    <- loo(fit_pcm_merged)
+
+# 将各模型的 LOO 对象放入一个列表中，并命名
+loo_mlist <- list(
+  GRM   = loo_m_grm,
+  GPCM  = loo_m_gpcm,
+  GRSM  = loo_m_grsm,
+  PCM   = loo_m_pcm
+)
+
+# 使用 loo_compare 进行比较
+loo_m_comparison <- loo_compare(loo_mlist)
+
+# 打印比较结果
+print(loo_m_comparison)
+```
+All four models offer reasonable threshold and other stats. And the loo test tolds us that PCM & GPCM work similarly well, and both way better than GRM and GRSM.
+
+## GPCM check
+
+```{r}
+
+# 提取 GPCM 模型的随机效应
+ranef_gpcm <- ranef(fit_gpcm_merged)
+
+# 整理难度（阈值）数据：合并每个 item 的 "Intercept[1]", "Intercept[2]", "Intercept[3]"
+difficulty_data <- bind_rows(
+  as_tibble(ranef_gpcm$item[, , "Intercept[1]"], rownames = "item") %>% mutate(threshold = 1),
+  as_tibble(ranef_gpcm$item[, , "Intercept[2]"], rownames = "item") %>% mutate(threshold = 2),
+  as_tibble(ranef_gpcm$item[, , "Intercept[3]"], rownames = "item") %>% mutate(threshold = 3)
+) %>%
+  mutate(item = factor(item, levels = items_26)) %>%
+  # 对同一 item 的不同阈值在 y 轴上做轻微偏移，便于区分
+  mutate(ypos = as.numeric(item) + (threshold - 2) * 0.15)
+
+# 整理区分度数据：提取 disc_Intercept 参数并取指数（通常在对数尺度上建模）
+discrimination_data <- as_tibble(exp(ranef_gpcm$item[, , "disc_Intercept"]), rownames = "item") %>%
+  mutate(item = factor(item, levels = items_26))
+
+# 绘制难度（阈值）图：对不同阈值映射不同颜色，并显示图例
+plot_diff <- ggplot(difficulty_data, aes(x = Estimate, y = ypos, color = factor(threshold))) +
+  geom_point(size = 1.5) +
+  geom_errorbarh(aes(xmin = Q2.5, xmax = Q97.5), height = 0.2) +
+  scale_y_continuous(breaks = 1:length(levels(difficulty_data$item)),
+                     labels = levels(difficulty_data$item)) +
+  labs(title = "Item Thresholds", x = "Estimate", y = NULL, color = "Threshold") +
+  theme(legend.position = "right")
+
+# 绘制区分度图（保持原样）
+plot_disc <- ggplot(discrimination_data, aes(x = Estimate, y = item)) +
+  geom_vline(xintercept = 0.5, linetype = "dashed", color = "gray50") +
+  geom_point(size = 1.5) +
+  geom_errorbarh(aes(xmin = Q2.5, xmax = Q97.5), height = 0.2) +
+  labs(title = "Item Discrimination", x = "Estimate", y = NULL)
+
+# 合并两个图形并显示
+combined_plot <- plot_diff | plot_disc
+print(combined_plot)
+
+```
+While looking closely into GPCM, the output looks not that good anymore. We can see the flexible threshold setting let the model be more sensitive about abnormal data pattern - originally, grsm assume every item with identical threshold, while in GPCM map shows that the many items strongly against the assumption. More specifically, almost all reversed coding items shows strongly reverse threshold order, and some items have extremely unstable yet low estimate on threshold 3, implying for teachers with high connectionnist tendency, it is much easier to endorse category 3 (that frequently conducting transmissionist pedagogy) than category 1 (seldom conduct transmissionist practice). Moreover, the discrimination of these items are either lower or very likely lower than the warning threshold 0.5, suggesting that these item can't distinguish teachers well in terms of connectionnism (if we now can admit that the connectionnism is still on the spectrum while transmissionism might not at the linear other end any more.)
+
+# Model Iteration (adjusting items)
+```{r,echo=FALSE, results='hide'}
+# 定义需要删除的反向计分项目
+reverse_items_to_remove <- c("P_2_r", "P_11_r", "P_15_r", "P_21_r","P_14_r","P_24_r","P_20_r","P_25_r"
+                            )
+
+# 创建保留项目列表 (26个原始项目 - 8个反向项目)
+remaining_items <- setdiff(items_26, reverse_items_to_remove)
+
+long_data_filtered <- long_data_merged %>%
+  filter(item %in% remaining_items) %>%
+  # 确保响应变量为有序因子（如果尚未设置）
+  mutate(response = ordered(response))
+
+# 定义模型公式
+bf_gpcm_filtered <- bf(
+  response ~ 1 + (cs(1)|i|item) + (1|person),  # GPCM模型
+  disc ~ 1 + (1|i|item),
+  family = brmsfamily("acat", "logit")
+)
+
+# 设置先验分布
+priors_gpcm <- c(
+  prior(normal(0, 3), class = "Intercept"),
+  prior(normal(0, 3), class = "sd", group = "item"),
+  prior(normal(0, 3), class = "sd", group = "person"),
+  prior(normal(0, 1), class = "sd", group = "item", dpar = "disc")
+)
+
+# 拟合GPCM模型
+fit_gpcm_filtered <- brm(
+  bf_gpcm_filtered,
+  data = long_data_filtered,
+  prior = priors_gpcm,
+  chains = 4,
+  cores = 4,
+  iter = 2000,
+  warmup = 1000,
+  control = list(adapt_delta = 0.99, max_treedepth = 15),
+  file = "models/fit_gpcm_filtered"
+)
+
+```
+## Stats of GPCM with filtered items
+
+```{r}
+summary(fit_gpcm_filtered)
+```
+Now we delete all the reversed coding items and re-fit the GPCM model (I iterate for varies version to try to maintain some reversed item, but can't find a way to maintain all items certainly above the warning discrimination threshold 0.5.)
+
+##GPCM_filtered difficulty-discrimination map 
+
+```{r}
+
+# 提取 GPCM 模型的随机效应
+ranef_gpcm_f <- ranef(fit_gpcm_filtered)
+
+# 整理难度（阈值）数据：合并每个 item 的 "Intercept[1]", "Intercept[2]", "Intercept[3]"
+difficulty_data <- bind_rows(
+  as_tibble(ranef_gpcm_f$item[, , "Intercept[1]"], rownames = "item") %>% mutate(threshold = 1),
+  as_tibble(ranef_gpcm_f$item[, , "Intercept[2]"], rownames = "item") %>% mutate(threshold = 2),
+  as_tibble(ranef_gpcm_f$item[, , "Intercept[3]"], rownames = "item") %>% mutate(threshold = 3)
+) %>%
+  mutate(
+    item = factor(item, levels = remaining_items),
+    ypos = as.numeric(item) + (threshold - 2) * 0.15
+  )
+
+# 整理区分度数据：提取 disc_Intercept 参数并取指数（通常在对数尺度上建模）
+discrimination_data <- as_tibble(exp(ranef_gpcm_f$item[, , "disc_Intercept"]), rownames = "item") %>%
+   mutate(item = factor(item, levels = remaining_items))
+
+# 绘制难度（阈值）图：对不同阈值映射不同颜色，并显示图例
+plot_diff <- ggplot(difficulty_data, aes(x = Estimate, y = ypos, color = factor(threshold))) +
+  geom_point(size = 1.5) +
+  geom_errorbarh(aes(xmin = Q2.5, xmax = Q97.5), height = 0.2) +
+  scale_y_continuous(breaks = 1:length(levels(difficulty_data$item)),
+                     labels = levels(difficulty_data$item)) +
+  labs(title = "Thresholds", x = "Estimate", y = NULL, color = "Threshold") +
+  theme(legend.position = "right")
+
+plot_disc <- ggplot(discrimination_data, aes(x = Estimate, y = item)) +
+  geom_vline(xintercept = 0.5, linetype = "dashed", color = "gray50") +
+  geom_point(size = 1.5) +
+  geom_errorbarh(aes(xmin = Q2.5, xmax = Q97.5), height = 0.2) +
+  labs(title = "Discrimination", x = "Estimate", y = NULL)
+# 合并两个图形并显示
+combined_plot_f <- plot_diff | plot_disc
+print(combined_plot_f)
+```
+After adjustment, the data seems much more reasonable: firstly, no item's discrimination is completely below the warning threshold; secondly, the difficulty threshold of each item is more evenly distributed - although there are still some items that seem to have a reversed pattern within the threshold, there are no longer extreme outliers. Especially considering the small sample size, this iterative version is acceptable.
+
+## Competing IRTs
+
+```{r,echo=FALSE, results='hide'}
+
+# 定义模型公式
+bf_pcm_filtered <- bf(
+  response ~ 1 + (cs(1)|i|item) + (1|person),  # GPCM模型
+
+  family = brmsfamily("acat", "logit")
+)
+
+# 设置先验分布
+priors_pcm <- c(
+  prior(normal(0, 3), class = "Intercept"),
+  prior(normal(0, 3), class = "sd", group = "item"),
+  prior(normal(0, 3), class = "sd", group = "person")
+
+)
+
+fit_pcm_filtered <- brm(
+  bf_pcm_filtered,
+  data = long_data_filtered,
+  prior = priors_pcm,
+  chains = 4,
+  cores = 4,
+  iter = 2000,
+  warmup = 1000,
+  control = list(adapt_delta = 0.99, max_treedepth = 15),
+  file = "models/fit_pcm_filtered"
+)
+
+
+# 定义模型公式
+bf_grm_filtered <- bf(
+  response ~ 1 + (1|i|item) + (1|person),  # GPCM模型
+ disc ~ 1 + (1|i|item),
+  family = brmsfamily("cumulative", "logit")
+)
+
+# 设置先验分布
+priors_grm <- c(
+  prior(normal(0, 3), class = "Intercept"),
+  prior(normal(0, 3), class = "sd", group = "item"),
+  prior(normal(0, 3), class = "sd", group = "person"),
+ prior(normal(0, 1), class = "sd", group = "item", dpar = "disc")
+
+)
+
+fit_grm_filtered <- brm(
+  bf_grm_filtered,
+  data = long_data_filtered,
+  prior = priors_grm,
+  chains = 4,
+  cores = 4,
+  iter = 2000,
+  warmup = 1000,
+  control = list(adapt_delta = 0.99, max_treedepth = 15),
+  file = "models/fit_grm_filtered"
+)
+
+
+
+# 定义模型公式
+bf_grsm_filtered <- bf(
+  response ~ 1 + (1|i|item) + (1|person), 
+  disc ~ 1 + (1|i|item),
+
+  family = brmsfamily("acat", "logit")
+)
+
+
+
+fit_grsm_filtered <- brm(
+  bf_grsm_filtered,
+  data = long_data_filtered,
+  prior = priors_gpcm,
+  chains = 4,
+  cores = 4,
+  iter = 2000,
+  warmup = 1000,
+  control = list(adapt_delta = 0.99, max_treedepth = 15),
+  file = "models/fit_grsm_filtered"
+)
+
+
+```
+```{r}
+# 分别提取各模型的 LOO 对象
+loo_grm    <- loo(fit_grm_filtered)
+loo_gpcm   <- loo(fit_gpcm_filtered)
+loo_grsm   <- loo(fit_grsm_filtered)
+loo_pcm    <- loo(fit_pcm_filtered)
+
+# 将各模型的 LOO 对象放入一个列表中，并命名
+loo_list <- list(
+  GRM   = loo_grm,
+  GPCM  = loo_gpcm,
+  GRSM  = loo_grsm,
+  PCM   = loo_pcm
+)
+
+# 使用 loo_compare 进行比较
+loo_comparison <- loo_compare(loo_list)
+
+# 打印比较结果
+print(loo_comparison)
+```
+We can see now there is only very small difference between models - we can still say that GRSM works worse than others (|elpd_diff| > 2* se_diff), but basically GRM/GPCM/PCM works the same. From GPCM discrimination map, we already see that we have a relatively stable discrimination distribution, and from the loo test, we know that the model won't lose significant information by assuming all discriminations = 1. Thus I choose PCM model for the final structure.
+
+# Final choice - PCM
+```{r}
+
+summary(fit_pcm_filtered)
+plot (fit_pcm_filtered)
+
+```
+
+## PCM difficulty - ability map
+```{r}
+# Extract random effects and thresholds
+ranef_pcm <- ranef(fit_pcm_filtered)
+difficulty_data <- bind_rows(
+  as_tibble(ranef_pcm$item[, , "Intercept[1]"], rownames = "item") %>% mutate(threshold = 1),
+  as_tibble(ranef_pcm$item[, , "Intercept[2]"], rownames = "item") %>% mutate(threshold = 2),
+  as_tibble(ranef_pcm$item[, , "Intercept[3]"], rownames = "item") %>% mutate(threshold = 3)
+) %>%
+  mutate(
+    item = factor(item, levels = remaining_items),
+    ypos = as.numeric(item) + (threshold - 2) * 0.15
+  )
+
+# Person parameters
+person_params <- ranef_pcm$person[, , "Intercept"] %>%
+  as_tibble(rownames = "person") %>%
+  arrange(Estimate) %>%
+  mutate(id = row_number())
+
+# Create plots
+p1 <- ggplot(difficulty_data, aes(x = Estimate, y = ypos, color = factor(threshold))) +
+  geom_point(size = 1.5) +
+  geom_errorbarh(aes(xmin = Q2.5, xmax = Q97.5), height = 0.2) +
+  scale_y_continuous(breaks = 1:length(levels(difficulty_data$item)),
+                    labels = levels(difficulty_data$item)) +
+  labs(title = "Item Thresholds", x = "Estimate", y = NULL, color = "Threshold") 
+ 
+
+p2 <- ggplot(person_params, aes(x = Estimate, y = id)) +
+  geom_pointrange(aes(xmin = Q2.5, xmax = Q97.5), size = 0.3) +
+  labs(title = "Person Parameters", x = "Estimate", y = "ID (sorted)") 
+ 
+
+combined_plot <- p1 | p2
+
+ggsave("threshold_ability_plot.pdf", combined_plot, width = 12, height = 8, dpi = 300)
+print(combined_plot)
+```
+
+# DIF
+
+I used an approach that is almost the same as in the belief scale case – I included gender, year, and district as fixed effects, and then added gender and district to the random effects at the item level.
+
+
+```{r,echo=FALSE, results='hide'}
+# Create PCM DIF model with demographics
+bf_pcm_dif <- bf(
+ response | weights(weight) ~ 
+   gender + YearG + District +        # Fixed effects
+   (1 || item) +                      # Item random intercepts  
+   (0 + gender + District || item) +  # Item DIF random effects
+   (1 | person),                      # Person random intercepts
+ family = brmsfamily("acat", "logit")
+)
+
+# Set priors
+priors_pcm_dif <- c(
+   prior(normal(0, 3), class = "b"),
+   prior(normal(0, 3), class = "sd", group = "item"),
+   prior(normal(0, 3), class = "sd", group = "person")
+)
+
+# Create DIF dataset with demographics as factors
+long_data_dif <- long_data_filtered %>%
+  left_join(
+    processed_data %>% 
+      mutate(
+        gender = factor(gender, levels = c(1, 2), labels = c("Male", "Female")),
+        YearG = factor(YearG, levels = c(1, 2, 3), labels = c("Year7", "Year8", "Year9")),
+        District = factor(District, levels = c(1, 2, 3), labels = c("District1", "District2", "District3"))
+      ) %>%
+      select(id, gender, YearG, District), 
+    by = c("person" = "id")
+  ) %>%
+  filter(!is.na(gender), !is.na(District))
+
+# Refit the model with factored demographics
+fit_pcm_dif <- brm(
+  bf_pcm_dif,
+  data = long_data_dif,
+  prior = priors_pcm_dif,
+  chains = 4, 
+  cores = 4,
+  iter = 2000,
+  warmup = 1000,
+  control = list(adapt_delta = 0.99, max_treedepth = 15),
+  file = "models/fit_pcm_dif"
+)
+```
+## Uniform DIF
+```{r}
+summary(fit_pcm_dif)
+```
+```{r}
+conditional_effects(fit_pcm_dif,effects = "gender", categorical = TRUE)
+conditional_effects(fit_pcm_dif,effects = "District", categorical = TRUE)
+```
+The results show that there is almost no clear uniform DIF at the gender and district levels, and that people of different genders and districts have similar responses to the questionnaire. Except for a very marginal DIF tendency in district 3 -0.42 [–0.87, 0.04] , which suggests that teachers working in low SES schools may use connectionist pedagogic practice less frequently than teachers working in high SES schools.
+From the uniform DIF graph we can also see the pattern that respondents from district 3 are more likely to endorse category 2 and less likely to endorse category 3. While the evidence is not statistically strong enough to say it is a uniform DIF effect.
+
+
+```{r}
+# Extract random effects
+ranef_pcm_dif <- ranef(fit_pcm_dif)
+
+# Gender effects (using genderMale)
+gender_effects <- ranef_pcm_dif$item[,,"genderMale"] %>%
+  as_tibble(rownames = "item") %>%
+  mutate(item = factor(item, levels = remaining_items))
+
+# District effects 
+district_effects <- bind_rows(
+  as_tibble(ranef_pcm_dif$item[,,"DistrictDistrict2"], rownames = "item") %>% 
+    mutate(district = "District2"),
+  as_tibble(ranef_pcm_dif$item[,,"DistrictDistrict3"], rownames = "item") %>% 
+    mutate(district = "District3")
+) %>%
+  mutate(item = factor(item, levels = remaining_items))
+
+# Create plots
+p1 <- ggplot(gender_effects, aes(x = Estimate, y = item)) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "gray50") +
+  geom_point(size = 1.5) +
+  geom_errorbarh(aes(xmin = Q2.5, xmax = Q97.5), height = 0.2) +
+  labs(title = "Gender DIF Effects", x = "Effect Size Female  vs Male (baseline)", y = NULL)
+
+p2 <- ggplot(district_effects, aes(x = Estimate, y = item, color = district)) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "gray50") +
+  geom_point(position = position_dodge(width = 0.5), size = 1.5) +
+  geom_errorbarh(aes(xmin = Q2.5, xmax = Q97.5),
+                 position = position_dodge(width = 0.5),
+                 height = 0.2) +
+  labs(title = "District DIF Effects", x = "Effect Size (vs District1)", y = NULL) 
+  
+
+dif_plots <- p1 | p2
+ggsave("pcm_dif_effects_ranef.pdf", dif_plots, width = 10, height = 12, dpi = 300)
+print(dif_plots)
+```
+
+## Item sepecific DIF
+
+There is no substantial evidence of Differential Item Functioning (DIF) within the items as well, as the posterior distributions of group differences remain close to zero with narrow credible intervals. This suggests that the questionnaire responses were largely invariant across different respondent groups.
+
+
+```{r}
+save.image("practice_instrument.RData")
+```
+
