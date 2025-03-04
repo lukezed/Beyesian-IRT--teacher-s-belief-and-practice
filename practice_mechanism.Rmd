@@ -1,0 +1,907 @@
+---
+title: "practice_housingprice_belief"
+author: "Chi Zhang"
+date: "2025-02-26"
+output:
+  pdf_document:
+    latex_engine: xelatex
+  html_document: default
+  word_document: default
+
+editor_options:
+  markdown:
+    wrap: sentence
+---
+
+
+```{r, echo=FALSE, results='hide', warning = FALSE, message = FALSE }
+
+# Clear environment 
+rm(list = ls())
+
+
+# Setting basic knitr options
+knitr::opts_chunk$set(
+  echo = FALSE,  # Don't show code in output
+  warning = FALSE,  # Don't show warnings
+  message = FALSE  # Don't show messages
+)
+
+
+library(brms)
+library(tidyverse)
+library(GGally)
+library(viridis)
+library(gridExtra)
+library(ggridges)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(bayesplot)
+library(bayestestR)
+library(extrafont)
+library(DiagrammeR)
+library(readxl)
+library(patchwork)
+library(readxl)
+library(mice)
+library(knitr)
+#ggplot theme setting...
+theme_set(bayesplot::theme_default())
+
+#Rstan setting...
+rstan::rstan_options(auto_write = TRUE)
+options(mc.cores = 4) # for running 4 chains
+
+# Create models directory if it doesn't exist
+if (!dir.exists("models")) {
+  dir.create("models")
+}
+
+```
+
+
+
+# Dataset
+
+  In this case study, I'm going to fit a Beyesian approach based linear regression model. First I'll explain the dataset. The project is part of my PhD study, and I collected data from mathematics teachers in China's secondary school via questionniare. There is 155 respondants in total. In MLM_data, it contains common demographic information.It also contains 8 set of plausible values of theta_P (i.e., teachers' connectionist tendency- how often they conduct conduct connectionist pedagogies) and thetaB_G (i.e., teachers' belief about equity, how inclusive they are in terms of teaching and learning in mathematics education.) Recall that we've also run Bayesian Item Response Model elsewhere, and here the 8 sets of plausible values is extrated randomly from the posterior of the two IRTs. Specically, it is the posterior of no. 1100/1500 iterations in chain 1; no. 1200/1600 iterations in chain 2; no, 1300/1700 iterations in chain 3; and 1400/1800 iterations in chain 4. picking them randomly is for caputring the uncertainties in previous IRT models.
+  The school_data contains housing price and school resouce data. Not all these demographic info will be used here, but it is not because I didn't try - I tried so many different combinations, and the case study here after is the relatively best choice I can think of.
+  Here is the brief variable description we are using later:
+  
+
+| **Variable**  | **Level**   | **Description** |
+|--------------|------------|----------------------------------------------------------------|
+| **Dependent Variable (DV)** |  |  |
+| θ_P (theta_P) | Teacher | Teacher's connectionist tendency. Higher scores indicate more frequent use of connectionist pedagogy. |
+| **Independent Variables (IVs)** |  |  |
+| **Teacher-Level Variables** |  |  |
+| θB_G (thetaB_G) | Teacher | Teacher's belief about equity. Higher scores indicate a more inclusive belief in mathematics education. |
+| Sex | Teacher | Gender: 1 for male, 2 for female. |
+| Attain_Lvl | Teacher | Self-reported average attainment level of students in their class (1-5 scale). Higher values indicate stronger perceived attainment. |
+| YearG | Teacher | The year group that the teacher teaches. |
+| **School-Level Variables** |  |  |
+| Sch_id | School | School ID. |
+| zlog_hp | School | Standardized log average housing price around the school. |
+| z_resource | School | Availability of educational resources on a standardised scale. |
+| District | School | School district classification (1/2/3) based on SES ranking, where 1 is the highest. |
+
+
+  
+  *(It should be noted that here I adopt a two-step Bayesian approach, in which I didn't 'take away' whole information from previous IRT models. The ideal Bayesian tradition is to jointly fit all the models, say including IRT fit and LM fit in a same Bayesian model. I gave up this full bayesian appraoch for serveral reasons:*
+  *i. The package I use (brms) does not support a explicit joint model that tranferring latent variables between each other;*
+  *ii. Additionally, the package that supports full Bayesian modeling in this case (e.g., rstan) requires extremely high computational power and highly optimized code logic. I attempted multiple times to construct a fully joint model, but I consistently encountered convergence issues. One major reason is the significant difference in data structures between the two modeling layers: in the IRT model, each respondent answered more than 50 items, resulting in over 7,500 response observations, meaning the data is relatively rich; however, in the LM model, only 155 teachers provided 155 observations. This imbalance in data structure makes it extremely difficult to achieve simultaneous convergence of both layers within a single MCMC simulation.)*
+
+```{r, echo=FALSE, results='hide'}
+MLM_data <- read_excel("~/Desktop/belief-practice-relation/MLM_data.xlsx")
+View(MLM_data)
+school_data<- read_excel("~/Desktop/belief-practice-relation/school_data_processing.xlsx")
+View(school_data)
+```
+
+# Data Cleaning
+
+Let's do some data cleaning. I was already aware that my data structure contained some missing values, so I standardized their representation by displaying them uniformly as NA. Then, I matched my eight sets of plausible teacher theta values with the cleaned dataset, resulting in eight corresponding plausible datasets.
+
+```{r}
+# Initial data cleaning: convert 0 to NA and handle specific Sch_ID values
+cleaned_data <- MLM_data %>%
+  mutate(
+    District   = na_if(District, 0),
+    Sch_ID     = case_when(
+                   Sch_ID %in% c(0, 100, 199, 200, 299, 300, 399) ~ 0,
+                   TRUE ~ Sch_ID
+                 ),
+    Sex        = na_if(gender, 0),
+    YearG      = na_if(YearG, 0),
+    Attain_Lvl = na_if(Attain_Lvl, 0)
+  ) %>%
+  mutate(
+    District   = as.factor(District),
+    Sch_ID     = as.factor(Sch_ID),
+    YearG      = as.factor(YearG),
+    Attain_Lvl = as.factor(Attain_Lvl),
+    Sex        = as.factor(Sex)
+  )
+
+# Create list to store imputation datasets from 8 plausible value sets
+imputed_list <- list()
+counter <- 1
+
+# Loop through the 8 sets of plausible values
+for(i in 1:8) {
+  # Construct variable names for current group
+  theta_P_var <- paste0("theta_P_", i)
+  thetaB_G_var <- paste0("thetaB_G_", i)
+  
+  # Select variables needed for imputation
+  subset_vars <- c("District", "Sch_ID", "Sex", "YearG", 
+                   "Attain_Lvl", 
+                   theta_P_var, thetaB_G_var)
+  
+  # Create subset of data with only needed variables
+  subset_data <- cleaned_data %>%
+    select(all_of(subset_vars))
+  
+  # Print information about the subset data
+  cat("Subset data for plausible value set", i, "created with", nrow(subset_data), "rows and", ncol(subset_data), "columns\n")
+  
+  # Add subset to list (will be used for imputation in next step)
+  imputed_list[[i]] <- subset_data
+}
+
+# Check structure of first subset
+str(imputed_list[[1]])
+```
+## Multiple imputation for missing data
+
+Ideally in Bayesian tradition, the missing data is best estimated jointly with the main model. However my missing data are mainly discrete data (e.g., gender, district, attainlvl etc.), the flagship algorithm HMC, which is built into brms, faces significant challenges in estimating discrete data as missing values simultaneously. Therefore, I chose to handle these missing data externally using multiple imputation before fitting the model.
+Here, I perform multiple imputations separately for each set of plausible data. Within each dataset, I establish a global prediction strategy, meaning that all available observed data are used to estimate the missing values.
+It is important to note that θ_P (theta_P) is the dependent variable (DV) and has no missing data, so it is excluded from the imputation process. Additionally, Sch_ID is also not imputed. A small number of teachers did not report their school ID, and rather than predicting their likely school assignment, I chose to place them into a placeholder school category labeled as "0" instead of imputing a potentially incorrect school group.
+For each set of plausible data, the imputation process undergoes 20 iterations using the built-in algorithm in the mice package to ensure stability and convergence. After these iterations, five different imputed versions are generated for each plausible dataset, incorporating natural variability in missing data estimation. Given that there are eight plausible datasets in total, this process results in the creation of 40 fully imputed datasets for further analysis.
+```{r, echo=FALSE, results='hide'}
+# Load the mice package for multiple imputation
+library(mice)
+
+# Initialize storage for imputed datasets
+imputed_full_list <- list()
+counter <- 1
+
+# Loop through the 8 sets of plausible values
+for(i in 1:8) {
+  # Construct variable names for current group
+  theta_P_var <- paste0("theta_P_", i)
+  thetaB_G_var <- paste0("thetaB_G_", i)
+  
+  # Select variables needed for imputation
+  subset_vars <- c("District", "Sch_ID", "Sex", "YearG", 
+                   "Attain_Lvl", 
+                   theta_P_var, thetaB_G_var)
+  
+  # Create subset of data with only needed variables
+  subset_data <- cleaned_data %>%
+    select(all_of(subset_vars))
+  
+  # Setup imputation methods
+  meth <- make.method(subset_data)
+  
+  # Specify imputation method for each variable type
+  meth["Sex"] <- "logreg"        # Binary variable
+  meth[c("District", "YearG", "Attain_Lvl")] <- "polyreg"  # Categorical variables
+  meth[thetaB_G_var] <- "norm"   # Continuous variable
+  
+  # Variables not to be imputed
+  no_impute_vars <- c("Sch_ID", theta_P_var)
+  meth[no_impute_vars] <- ""
+  
+  # Setup prediction matrix
+  pred <- make.predictorMatrix(subset_data)
+  
+  # Set all variables to predict each other
+  pred[,] <- 1
+  
+  # Set variables that should not be predicted or used for prediction
+  for(var in no_impute_vars) {
+    pred[var,] <- 0  # Variable doesn't predict others
+    pred[,var] <- 0  # Variable isn't predicted by others
+  }
+  
+  # Set diagonal to 0 (variables don't predict themselves)
+  diag(pred) <- 0
+  
+  # Run imputation
+  imp <- mice(
+    subset_data,
+    m = 5,             # Create 5 imputed datasets
+    maxit = 20,        # Maximum 20 iterations
+    method = meth,
+    predictorMatrix = pred,
+    seed = 123 + i,    # Set seed for reproducibility
+    print = TRUE
+  )
+  
+  # Extract the 5 imputed datasets and add to the main list
+  for(m in 1:5) {
+    complete_data <- complete(imp, m)
+    imputed_full_list[[counter]] <- complete_data
+    counter <- counter + 1
+  }
+}
+
+# Rename variables in all imputed datasets
+imputed_list_renamed <- lapply(seq_along(imputed_full_list), function(idx) {
+  dat <- imputed_full_list[[idx]]
+  pv_group <- ceiling(idx / 5)  # Determine which plausible value group
+  
+  # Specify old and new names
+  old_names <- c(
+    paste0("theta_P_", pv_group),
+    paste0("thetaB_G_", pv_group)
+  )
+  new_names <- c("theta_P", "thetaB_G")
+  
+  # Rename the variables
+  dat <- dat %>% rename_at(vars(all_of(old_names)), ~ new_names)
+  return(dat)
+})
+
+# Verify we have 40 datasets
+length(imputed_list_renamed)
+
+# Check structure of first renamed dataset
+str(imputed_list_renamed[[1]])
+
+```
+
+## School data processing
+
+For the school level data, some pre-processing is needed here. According to the literature, I aggregate educational resource variable from number of students/number of teachers/building area/financial expenditure. Specifically, I first calculate the area/teacher/financial expenditure per student, and then normalised each variable to unify the scale, and use the weighted adding strategy (used in literature: n_resource = 0.2 * norm_area + 0.5 * norm_teacher + 0.3 * norm_finance) to get the variable n_resource. For housing price, logarithmic transformation before standardisation is also standard practice in the literature (to handle skewed distribution nature of hp).
+
+```{r}
+# Process school data to create resource indicator and standardized log housing prices
+processed_school_data <- school_data %>%
+  # Calculate ratios
+  mutate(
+    area_ratio = school_building_area / student_enrollment,
+    teacher_ratio = teacher / student_enrollment,
+    financial_ratio = financial_expenditure / student_enrollment
+  ) %>%
+  # Standardize ratios (convert to z-scores)
+  mutate(
+    z_area = scale(area_ratio)[,1],
+    z_teacher = scale(teacher_ratio)[,1],
+    z_finance = scale(financial_ratio)[,1]
+  ) %>%
+  # Create weighted resource score from standardized variables
+  mutate(
+    z_resource = 0.2 * z_area + 0.5 * z_teacher + 0.3 * z_finance
+  ) %>%
+  # Process housing price: log transform and standardize
+  mutate(
+    log_hp = log(housing_price),
+    zlog_hp = scale(log(housing_price))[,1]  # Standardize log housing price
+  ) %>%
+  # Keep only columns needed for merging
+  select(Sch_ID, z_resource, zlog_hp)
+# Convert Sch_ID to factor to match the imputed datasets
+processed_school_data$Sch_ID <- as.factor(processed_school_data$Sch_ID)
+
+# Add school-level variables to all 40 imputed datasets
+final_imputed_datasets <- lapply(imputed_list_renamed, function(df) {
+  # Merge the imputed dataset with school data using Sch_ID
+  left_join(df, processed_school_data, by = "Sch_ID")
+})
+
+# Update all datasets to set YearG and Attain_Lvl as ordered factors
+final_imputed_datasets <- lapply(final_imputed_datasets, function(df) {
+  df$YearG <- factor(df$YearG, ordered = TRUE)
+  df$Attain_Lvl <- factor(df$Attain_Lvl, ordered = TRUE)
+  return(df)
+})
+
+# Check if the merge was successful by examining the first dataset
+head(final_imputed_datasets[[1]])
+
+# Verify that the school variables were properly added
+summary(final_imputed_datasets[[1]]$z_resource)
+summary(final_imputed_datasets[[1]]$zlog_hp)
+
+# Add standardized versions of theta_P and thetaB_G to all datasets
+final_imputed_datasets <- lapply(final_imputed_datasets, function(df) {
+  df %>% 
+    mutate(
+      ztheta_P = scale(theta_P)[,1],
+      zthetaB_G = scale(thetaB_G)[,1]
+    )
+})
+
+
+```
+
+# Model test
+To recall - now I have 40 plausible datasets with no missing data, and I would like to know the mechanism for teacher conducting connectionist practice. 
+
+## Model iteration 
+I have done way more work than it presented here, but a logical testing/thinking procedure can be this: 
+1. (test-simple): P ~ B 
+- we want a simple model including the main variable only.
+
+2. (test_basic_lm): P ~ B + District + Sex + mo(YearG) + mo(Attain_Lvl) + zlog_hp + z_resource
+- We want to add in all variables that we are interested in.
+
+3. (test_mlm): P ~ B + District + Sex + mo(YearG) + mo(Attain_Lvl) + zlog_hp + z_resource + (1|school)
+- We want to introduce the multilevel nature of the data in. Note that even if statistically the multilevel choice works slightly worse than single level choice, I'd still prefer mlm (unless it's ‘incredibly’ bad) - because it provides irreplaceable explanatory power, as in reality teachers are nested in schools, and we'd like to know if, and to what extent, the intercept is different from school to school (i.e., even if there is no pattern found, it still provides important information).
+
+4. (test_BgAttainonly_mlm): P ~ B * mo(Attain_Lvl) + District + Sex + mo(YearG) + zlog_hp + z_resource + (1|school)
+5. (test_hpYearG_mlm): P ~ B + mo(Attain_Lvl) + District + Sex + mo(YearG) * zlog_hp + z_resource + (1|school)
+
+- If we are lucky that our dataset/model is good enough, and our assumption is simple enough, we can stop at model3. Simple models always have clearer presentation and better explanation power. But there is no harm to try some other settings, like interactions, here. However, mathematically we can try so many combinations here, we need to choose the ones guided by theory/assumption. To be very honest, I almost tried everything - It seems that my various combinations of variables have pretty good explanatory power in the sense of folk psychology, This can be good or/and bad. Here, I mainly look into:
+i. the interaction between B and mo(Attain_Lvl; 
+ii. the interaction between zlop_hp and mo(YearG).
+
+6. (test_final2_mlm): P ~ B * mo(Attain_Lvl) + District + Sex + mo(YearG) * zlog_hp + n_resource + (1|school)
+
+For small scale dataset, we should always consider whether our model can include the complexity we want. I then tried three combinations to include information from model 4/5.
+
+*(Note that it is also common, and yet powerful(!), to include random slope in higher level, e.g., (1+B|school). I've tried different combinations, but as my dataset scale is too small, that some level/schools contains less than 5 teachers, it makes the random slope unstable. That's why I gave up, but that doesn't mean there's no need to test this step.)*
+
+```{r, echo=FALSE, results='hide'}
+my_priors <- c(
+  prior(normal(0, 1), class = "Intercept"),
+  prior(normal(0, 1), class = "b")
+)
+
+
+# Model 1: Simple model (P ~ B)
+formula_simple <- bf(ztheta_P ~ zthetaB_G)
+test_simple <- brm(
+  formula = formula_simple,
+  data = final_imputed_datasets[[1]],
+  prior = my_priors,
+  chains = 4,
+  cores = 4,
+  iter = 1000,
+  warmup = 500,
+  control = list(adapt_delta = 0.99, max_treedepth = 15),
+  file = "models/test_simple"  # brms will automatically check for this file
+)
+
+# Model 2: Basic linear model with covariates
+formula_basic_lm <- bf(ztheta_P ~ zthetaB_G + District + Sex + mo(YearG) + zlog_hp + z_resource + mo(Attain_Lvl))
+test_basic_lm <- brm(
+  formula = formula_basic_lm,
+  data = final_imputed_datasets[[1]],
+  prior = my_priors,
+  chains = 4,
+  cores = 4,
+  iter = 1000,
+  warmup = 500,
+  control = list(adapt_delta = 0.99, max_treedepth = 15),
+  file = "models/test_basic_lm"
+)
+
+# Model 3: Multilevel model with random intercept
+formula_mlm <- bf(ztheta_P ~ zthetaB_G + District + Sex + mo(YearG) + zlog_hp + z_resource + mo(Attain_Lvl) + (1|Sch_ID))
+test_mlm <- brm(
+  formula = formula_mlm,
+  data = final_imputed_datasets[[1]],
+  prior = my_priors,
+  chains = 4,
+  cores = 4,
+  iter = 1000,
+  warmup = 500,
+  control = list(adapt_delta = 0.99, max_treedepth = 15),
+  file = "models/test_mlm"
+)
+
+
+# Model 4:  Multilevel model with interaction BgAttain
+
+formula_BgAttainonly_mlm <- bf(ztheta_P ~ zthetaB_G*mo(Attain_Lvl) + District + Sex + mo(YearG) + zlog_hp + z_resource + (1|Sch_ID))
+test_BgAttainonly_mlm <- brm(
+  formula = formula_BgAttainonly_mlm,
+  data = final_imputed_datasets[[1]],
+  prior = my_priors,
+  chains = 4,
+  cores = 4,
+  iter = 1000,
+  warmup = 500,
+  control = list(adapt_delta = 0.99, max_treedepth = 15),
+  file = "models/test_BgAttainonly_mlm"
+)
+
+
+# Model 5: Multilevel model with interaction between year group and housing price
+formula_hpYearG_mlm <- bf(ztheta_P ~ zthetaB_G + District + Sex + mo(YearG)*zlog_hp + z_resource + mo(Attain_Lvl) + (1|Sch_ID))
+test_hpYearG_mlm <- brm(
+  formula = formula_hpYearG_mlm,
+  data = final_imputed_datasets[[1]],
+  prior = my_priors,
+  chains = 4,
+  cores = 4,
+  iter = 1000,
+  warmup = 500,
+  control = list(adapt_delta = 0.99, max_treedepth = 15),
+  file = "models/test_hpYearG_mlm"
+)
+
+# Model 6: Final multilevel model with both interactions and nonlinear term
+formula_final1_mlm <- bf(ztheta_P ~ zthetaB_G*mo(Attain_Lvl) + District + Sex + mo(YearG)*zlog_hp + z_resource + (1|Sch_ID))
+test_final1_mlm <- brm(
+  formula = formula_final1_mlm,
+  data = final_imputed_datasets[[1]],
+  prior = my_priors,
+  chains = 4,
+  cores = 4,
+  iter = 1000,
+  warmup = 500,
+  control = list(adapt_delta = 0.99, max_treedepth = 15),
+  file = "models/test_final1_mlm"
+)
+
+
+```
+## Model Comparison
+
+Let's first be clear about the purpose of model comparison here - we are not aim to analyse each model's output (we'll do this later), but instead, we want to know whether the models are stable enough, and which provides more information, and is better. Three model evaluation metrics are used here: Bayes R^2 (similar to R^2 in frequentism); LOO-CV (Leave-One-Out Cross-Validation, a model comparison criterion used to estimate out-of-sample predictive accuracy); Model weights.
+As we can see in the output, final1_mlm performs relatively the best in all metrics. 
+
+```{r, warning= FALSE}
+# Calculate LOO for each model
+loo_simple <- loo(test_simple)
+loo_basic_lm <- loo(test_basic_lm)
+loo_mlm <- loo(test_mlm)
+loo_BgAttainonly_mlm <- loo(test_BgAttainonly_mlm)
+loo_hpYearG_mlm <- loo(test_hpYearG_mlm)
+loo_final1_mlm <- loo(test_final1_mlm)
+
+# Calculate Bayesian R² for each model
+bayes_R2_simple <- bayes_R2(test_simple)
+bayes_R2_basic_lm <- bayes_R2(test_basic_lm)
+bayes_R2_mlm <- bayes_R2(test_mlm)
+bayes_R2_BgAttainonly_mlm <- bayes_R2(test_BgAttainonly_mlm)
+bayes_R2_hpYearG_mlm <- bayes_R2(test_hpYearG_mlm)
+bayes_R2_final1_mlm <- bayes_R2(test_final1_mlm)
+
+# Get stacking weights
+stacking_weights <- model_weights(
+  test_simple, test_basic_lm, test_mlm, 
+  test_BgAttainonly_mlm, test_hpYearG_mlm, test_final1_mlm,
+  weights = "stacking"
+)
+
+# Get overall LOO comparison
+loo_comparison <- loo_compare(
+  loo_simple, loo_basic_lm, loo_mlm,
+  loo_BgAttainonly_mlm, loo_hpYearG_mlm, loo_final1_mlm
+)
+
+# Get model names from LOO comparison 
+model_names <- rownames(loo_comparison)
+model_short_names <- gsub("test_", "", model_names)
+model_short_names <- gsub("\\..*", "", model_short_names)
+
+# Extract relative ELPD differences and SE
+rel_loo_values <- loo_comparison[, "elpd_diff"]
+rel_loo_se <- loo_comparison[, "se_diff"]
+
+# Create mapping from technical to readable model names
+model_mapping <- c(
+  "simple" = "Simple",
+  "basic_lm" = "Basic LM",
+  "mlm" = " MLM",
+  "BgAttainonly_mlm" = "B×Attain MLM",
+  "hpYearG_mlm" = "YearG×hp MLM",
+  "final1_mlm" = "Final (both interactions)"
+)
+
+# Create vectors for all statistics in LOO comparison order
+ordered_models <- sapply(model_short_names, function(name) model_mapping[name])
+ordered_rel_loo <- rel_loo_values
+ordered_rel_loo_se <- rel_loo_se
+ordered_weights <- numeric(length(model_short_names))
+ordered_r2 <- numeric(length(model_short_names))
+ordered_r2_low <- numeric(length(model_short_names))
+ordered_r2_high <- numeric(length(model_short_names))
+
+# Populate R2 and weights in proper order
+for (i in 1:length(model_short_names)) {
+  # Get the short name of the current model
+  current_model <- model_short_names[i]
+  
+  # Match with full model names for weights
+  weight_idx <- which(gsub("test_", "", names(stacking_weights)) == current_model)
+  if (length(weight_idx) > 0) {
+    ordered_weights[i] <- stacking_weights[weight_idx]
+  }
+  
+  # Match with R2 values based on model name
+  r2_var_name <- paste0("bayes_R2_", current_model)
+  if (exists(r2_var_name)) {
+    r2_var <- get(r2_var_name)
+    ordered_r2[i] <- mean(r2_var)
+    ordered_r2_low[i] <- quantile(r2_var, 0.025)
+    ordered_r2_high[i] <- quantile(r2_var, 0.975)
+  }
+}
+
+# Format all values for display
+loo_formatted <- sapply(1:length(ordered_rel_loo), function(i) {
+  if (ordered_rel_loo[i] == 0) {
+    return("0.00 [0.00, 0.00]")  # Best model
+  } else {
+    return(sprintf("%.2f [%.2f, %.2f]", 
+                   ordered_rel_loo[i], 
+                   ordered_rel_loo[i] - 1.96*ordered_rel_loo_se[i], 
+                   ordered_rel_loo[i] + 1.96*ordered_rel_loo_se[i]))
+  }
+})
+
+weight_formatted <- sprintf("%.3f%%", ordered_weights * 100)
+r2_formatted <- sprintf("%.3f [%.3f, %.3f]", ordered_r2, ordered_r2_low, ordered_r2_high)
+
+# Create the final comparison table
+model_comparison_table <- data.frame(
+  Model = ordered_models,
+  `ELPD diff [95% CI]` = loo_formatted,
+  `Weight` = weight_formatted,
+  `Bayesian R² [95% CI]` = r2_formatted
+)
+
+# Display formatted table
+library(knitr)
+kable(model_comparison_table, format = "markdown", align = c("l", "c", "c", "c"))
+```
+
+## Test different likelihood family
+Though we already staandardised all variables, considering the sample size is relatively (very) small, I test different likelihood family to see if choices other than normal (i.e., student_t and skew_normal) can have better performance. The result shows there is almost no difference between the three settings. Then we can comfortably continue analysing with default normal likelihood. 
+
+```{r,echo=FALSE, results='hide'}
+# Fit final model with Student's t likelihood
+test_final1_student <- brm(
+  formula = formula_final1_mlm,
+  data = final_imputed_datasets[[1]],
+  family = student(),
+  prior = my_priors,
+  chains = 4,
+  cores = 4,
+  iter = 1000,
+  warmup = 500,
+  control = list(adapt_delta = 0.99, max_treedepth = 15),
+  file = "models/test_final1_student"
+)
+
+# Fit final model with Skew Normal likelihood
+test_final1_skewnormal <- brm(
+  formula = formula_final1_mlm,
+  data = final_imputed_datasets[[1]],
+  family = skew_normal(),
+  prior = my_priors,
+  chains = 4,
+  cores = 4,
+  iter = 1000,
+  warmup = 500,
+  control = list(adapt_delta = 0.99, max_treedepth = 15),
+  file = "models/test_final1_skewnormal"
+)
+
+# Calculate LOO for the original and new models
+loo_final1_mlm <- loo(test_final1_mlm)
+loo_final1_student <- loo(test_final1_student)
+loo_final1_skewnormal <- loo(test_final1_skewnormal)
+
+```
+```{r}
+# Compare the three models
+loo_comparison <- loo_compare(loo_final1_mlm, loo_final1_student, loo_final1_skewnormal)
+print(loo_comparison)
+```
+
+# Final model presentation
+
+According to the test model comparison result, I choose the first three models (final MLM, MLM with HP*YearG, simple P~B). I also add the base MLM model for reference. 
+```{r,echo=FALSE, results='hide'}
+# Final1 模型: 包含交互项和非线性项
+final1_mlm_multiple <- brm_multiple(
+  formula = ztheta_P ~ zthetaB_G*mo(Attain_Lvl) + District + Sex + mo(YearG)*zlog_hp + z_resource + (1|Sch_ID),
+  data = final_imputed_datasets,
+  prior = my_priors,
+  chains = 4,
+  cores = 4,
+  iter = 1000,
+  warmup = 500,
+  control = list(adapt_delta = 0.99, max_treedepth = 15),
+  file = "models/final1_mlm_multiple"
+)
+
+# Simple model (belief only) with standardized variables
+simple_multiple <- brm_multiple(
+  formula = ztheta_P ~ zthetaB_G,
+  data = final_imputed_datasets,
+  prior = my_priors,
+  chains = 4,
+  cores = 4,
+  iter = 1000,
+  warmup = 500,
+  control = list(adapt_delta = 0.99, max_treedepth = 15),
+  file = "models/simple_multiple"
+)
+
+# Basic MLM model with standardized variables
+mlm_multiple <- brm_multiple(
+  formula = ztheta_P ~ zthetaB_G + District + Sex + mo(YearG) + zlog_hp + z_resource + mo(Attain_Lvl) + (1|Sch_ID),
+  data = final_imputed_datasets,
+  prior = my_priors,
+  chains = 4,
+  cores = 4,
+  iter = 1000,
+  warmup = 500,
+  control = list(adapt_delta = 0.99, max_treedepth = 15),
+  file = "models/mlm_multiple"
+)
+
+# hpYearG MLM model with standardized variables
+hpYearG_mlm_multiple <- brm_multiple(
+  formula = ztheta_P ~ zthetaB_G + District + Sex + mo(YearG)*zlog_hp + z_resource + mo(Attain_Lvl) + (1|Sch_ID),
+  data = final_imputed_datasets,
+  prior = my_priors,
+  chains = 4,
+  cores = 4,
+  iter = 1000,
+  warmup = 500,
+  control = list(adapt_delta = 0.99, max_treedepth = 15),
+  file = "models/hpYearG_mlm_multiple"
+)
+
+```
+## Final model summary
+
+
+### Simple model P ~ B
+
+```{r}
+# 简单模型对比
+cat("\n\nSIMPLE MODEL COMPARISON\n")
+cat("======================================\n")
+cat("TEST MODEL (single dataset)\n")
+cat("--------------------------------------\n")
+print(summary(test_simple))
+
+cat("\nMULTIPLE MODEL (40 imputed datasets)\n")
+cat("--------------------------------------\n")
+print(summary(simple_multiple))
+
+```
+The simple model indicates there is a small to medium positive association between B and P, with a posterior mean of β = 0.21 [0.06, 0.37] in test model, and β = 0.22 [0.02, 0.40] in the joint model. The entire credible interval is positive, providing strong evidence for a meaningful positive relationship. We can also visualise this as below:
+
+#### P ~ B presentation
+
+
+```{r,echo=FALSE, results='hide'}
+
+ce_test <- conditional_effects(test_simple,  "zthetaB_G")
+ce_multi <- conditional_effects(simple_multiple, "zthetaB_G")
+
+# Create the individual plots using plot = FALSE to return ggplot objects
+p1 <- plot(ce_test,plot=FALSE,points=TRUE)[[1]] + 
+  labs(title = "A (test) ")
+
+p2 <- plot(ce_multi,plot=FALSE,points=TRUE)[[1]] + 
+  labs(title = "B (joint)")
+
+
+# Combine the plots side by side using patchwork
+combined_plot <- p1 | p2
+```
+
+But as we can see, it is off huge uncertainty. This is also why Bayes R^2 of simple model is extremely low, indicating though it fits well, it can only explain little of the model variance. 
+
+```{r}
+
+combined_plot
+```
+
+## Basic MLM summary
+
+```{r}
+
+# 基本多层模型对比
+cat("\n\nBASIC MULTILEVEL MODEL COMPARISON\n")
+cat("======================================\n")
+cat("TEST MODEL (single dataset)\n")
+cat("--------------------------------------\n")
+print(summary(test_mlm))
+
+cat("\nMULTIPLE MODEL (40 imputed datasets)\n")
+cat("--------------------------------------\n")
+print(summary(mlm_multiple))
+
+```
+
+The MLM did not perform well in the previous test model comparison, but it is included here as a baseline multilevel model for reference. After adding the (1 | school) random effect, the coefficient for B remained largely unchanged. Furthermore, most of the variables we are interested in have minimal effects on P, with posterior mean coefficients all below 0.1. While District shows a small negative effect on P on average compared to the baseline level, its posterior credible interval crosses 0, indicating a high degree of uncertainty.
+
+
+
+## MLM with housing_price * YearGroup interaction
+
+
+```{r}
+
+# 年级-房价交互模型对比
+cat("\n\nhpYearG INTERACTION MODEL COMPARISON\n")
+cat("======================================\n")
+cat("TEST MODEL (single dataset)\n")
+cat("--------------------------------------\n")
+print(summary(test_hpYearG_mlm))
+
+cat("\nMULTIPLE MODEL (40 imputed datasets)\n")
+cat("--------------------------------------\n")
+print(summary(hpYearG_mlm_multiple))
+
+```
+
+However, after adding housing price * YearGroup term into the MLM model, some interesting patterns occur. 
+The housing price variable (zlog_hp) already shows a marginally large effect on P at the baseline level.At the same time, this effect is further moderated by YearG, as indicated by the negative interaction term (moYearG:zlog_hp = -0.38, 95% CI: -0.58, -0.18). 
+The results suggest that the positive effect of housing price on P decreases as YearG increases and may even reverse. In other words, while higher housing prices are generally associated with a greater connectionist teaching tendency in lower year groups, this effect diminishes and could become negative for teachers working with older students.
+This pattern well-occured in both test model and joint model, as visualised below:
+### Presentation of zlog_hp * YearG
+
+```{r,echo=FALSE, results='hide'}
+
+
+# Single dataset model conditional effects
+ce_test_hp <- conditional_effects(test_hpYearG_mlm, "zlog_hp")
+ce_test_hp_YearG <- conditional_effects(test_hpYearG_mlm, "zlog_hp:YearG")
+
+# Multiple imputation model conditional effects
+ce_multi_hp <- conditional_effects(hpYearG_mlm_multiple, "zlog_hp")
+ce_multi_hp_YearG <- conditional_effects(hpYearG_mlm_multiple, "zlog_hp:YearG")
+
+# Create individual plots
+p1_test <- plot(ce_test_hp, plot=FALSE)[[1]] + 
+  labs(title = "A (test)") 
+
+p2_test <- plot(ce_test_hp_YearG, plot=FALSE)[[1]] + 
+  labs(title = "B (test)") 
+
+p1_multi <- plot(ce_multi_hp, plot=FALSE)[[1]] + 
+  labs(title = "C (joint)") 
+
+p2_multi <- plot(ce_multi_hp_YearG, plot=FALSE)[[1]] + 
+  labs(title = "D (joint)") 
+
+# Combine plots - first row for test model, second row for multiple imputation model
+combined_plot <- (p1_test | p2_test) / (p1_multi | p2_multi)
+
+
+
+```
+```{r}
+combined_plot
+```
+
+
+## Final MLM with two interactions
+
+
+```{r}
+
+# 最终完整模型对比
+cat("\n\nFINAL MODEL COMPARISON\n")
+cat("======================================\n")
+cat("TEST MODEL (single dataset)\n")
+cat("--------------------------------------\n")
+print(summary(test_final1_mlm))
+
+cat("\nMULTIPLE MODEL (40 imputed datasets)\n")
+cat("--------------------------------------\n")
+print(summary(final1_mlm_multiple))
+```
+The final MLM model includes two interaction terms: Attain_Lvl × thetaB_G and zlog_hp × YearG. For zlog_hp × YearG, the same pattern is observed in both the test model (which uses a single plausible dataset) and the joint model (which aggregates results across 40 plausible datasets). At the baseline level, housing price (zlog_hp) has a marginally large positive effect on P, but this effect is negatively moderated by YearG.
+
+For thetaB_G × Attain_Lvl, the results show notable differences between the test and joint models. In the joint model, the originally small fixed effect of thetaB_G disappears at the baseline level, showing no meaningful effect. In contrast, in the test model, this effect shifts toward an uncertain negative direction, as indicated by a credible interval that crosses zero. Importantly, in the test model, Attain_Lvl moderates the effect of thetaB_G on P, meaning that at the same level of teacher belief (thetaB_G), teachers who perceive their students as having higher average attainment (Attain_Lvl) tend to use connectionist pedagogy more frequently. However, this interaction effect is weakened in the joint model, with the coefficient for moAttain_Lvl:zthetaB_G (0.12, Est. Error = 0.15, 95% CI: -0.19 to 0.44) becoming statistically uncertain, as its credible interval includes zero. This suggests that when considering the full distribution of plausible datasets, the moderating effect of Attain_Lvl becomes less pronounced, possibly due to increased variability in the estimated relationships.
+
+The random intercepts across schools show small variation on average (.17[.01, .44]), indicating that while teaching practices do differ between schools, these differences are not substantial.
+
+### final MLM thetaB presentation
+
+```{r, echo=FALSE, results='hide'}
+# Single dataset final model conditional effects for belief variables
+ce_test_final_thetaB <- conditional_effects(test_final1_mlm, "zthetaB_G")
+ce_test_final_thetaB_Attain <- conditional_effects(test_final1_mlm, "zthetaB_G:Attain_Lvl")
+
+# Multiple imputation final model conditional effects for belief variables
+ce_multi_final_thetaB <- conditional_effects(final1_mlm_multiple, "zthetaB_G")
+ce_multi_final_thetaB_Attain <- conditional_effects(final1_mlm_multiple, "zthetaB_G:Attain_Lvl")
+
+# Create individual plots for teacher belief effects
+p1_test <- plot(ce_test_final_thetaB, plot=FALSE,re_formula = NULL)[[1]] + 
+  labs(title = "A (test)") 
+p2_test <- plot(ce_test_final_thetaB_Attain, plot=FALSE, re_formula = NULL)[[1]] + 
+  labs(title = "B (test)") 
+p1_multi <- plot(ce_multi_final_thetaB, plot=FALSE,re_formula = NULL)[[1]] + 
+  labs(title = "C (joint)") 
+p2_multi <- plot(ce_multi_final_thetaB_Attain, plot=FALSE, re_formula = NULL)[[1]] + 
+  labs(title = "D (joint)") 
+
+# Combine teacher belief effects plots
+library(patchwork)
+combined_plot_thetaB <- (p1_test | p2_test) / (p1_multi | p2_multi)
+
+
+```
+
+```{r}
+# Display the combined plot
+combined_plot_thetaB
+```
+
+### final MLM hp*yearG presentation
+
+```{r, echo=FALSE, results='hide'}
+
+
+# Single dataset final model conditional effects
+ce_test_final_hp <- conditional_effects(test_final1_mlm, "zlog_hp")
+ce_test_final_hp_YearG <- conditional_effects(test_final1_mlm, "zlog_hp:YearG")
+
+# Multiple imputation final model conditional effects
+ce_multi_final_hp <- conditional_effects(final1_mlm_multiple, "zlog_hp")
+ce_multi_final_hp_YearG <- conditional_effects(final1_mlm_multiple, "zlog_hp:YearG")
+
+# Create individual plots for the housing price effects
+p1_test <- plot(ce_test_final_hp, plot=FALSE)[[1]] + 
+  labs(title = "A (test)") 
+p2_test <- plot(ce_test_final_hp_YearG, plot=FALSE)[[1]] + 
+  labs(title = "B (test)") 
+p1_multi <- plot(ce_multi_final_hp, plot=FALSE)[[1]] + 
+  labs(title = "C (joint)") 
+p2_multi <- plot(ce_multi_final_hp_YearG, plot=FALSE)[[1]] + 
+  labs(title = "D (joint)") 
+
+# Combine housing price effects plots
+
+combined_plot_hp <- (p1_test | p2_test) / (p1_multi | p2_multi)
+
+
+```
+
+```{r}
+# Display the combined plot
+combined_plot_hp
+
+```
+
+### final school random effect presentation
+
+```{r}
+
+school_ranef <- ranef(test_final1_mlm)$Sch_ID[,,"Intercept"]
+
+# Convert to data frame for plotting
+school_ranef_df <- data.frame(
+  Sch_ID = rownames(school_ranef),
+  Intercept = school_ranef[,1],
+  Lower = school_ranef[,3],  # Q2.5
+  Upper = school_ranef[,4]   # Q97.5
+)
+
+# Extract the district (first digit) from school ID for ordering and coloring
+school_ranef_df$District <- substr(school_ranef_df$Sch_ID, 1, 1)
+
+# Order schools by ID
+school_ranef_df$Sch_ID <- factor(school_ranef_df$Sch_ID, 
+                               levels = school_ranef_df$Sch_ID[order(as.numeric(school_ranef_df$Sch_ID))])
+
+# Create the forest plot
+ggplot(school_ranef_df, aes(x = Intercept, y = Sch_ID, color = District)) +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  geom_point(size = 2) +
+  geom_errorbarh(aes(xmin = Lower, xmax = Upper), height = 0.3) +
+  labs(title = "School-Level Random Effects", 
+       subtitle = "Deviations from overall intercept",
+       x = "Effect Size", 
+       y = "School ID") 
+
+
+```
+
